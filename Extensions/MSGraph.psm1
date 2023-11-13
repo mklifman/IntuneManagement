@@ -10,7 +10,7 @@ This module manages Microsoft Grap fuctions like calling APIs, managing graph ob
 #>
 function Get-ModuleVersion
 {
-    '3.9.0'
+    '3.9.2'
 }
 
 $global:MSGraphGlobalApps = @(
@@ -184,6 +184,14 @@ function Invoke-InitializeModule
     }) "GraphSilent"
 
     Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "Login with App in UI (Preview)"
+        Key = "GraphAzureAppLogin"
+        Type = "Boolean"
+        DefaultValue = $false
+        Description = "Login with specified app in the UI. Note: Change will require app restart"
+    }) "GraphSilent"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
         Title = "Refresh Objects after copy"
         Key = "RefreshObjectsAfterCopy"
         Type = "Boolean"
@@ -214,6 +222,15 @@ function Invoke-InitializeModule
         DefaultValue = $false
         Description = "Expand assignments when listing objects. This can be used in custom columns based on assignment info"
     }) "GraphGeneral"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "Use Graph 1.0 (Not Recommended)"
+        Key = "UseGraphV1"
+        Type = "Boolean"
+        DefaultValue = $false
+        Description = "This will use production verionof graph, v1.0. Note: Thot officially supported since this can have unpredicted results. Some parts will require Beta version of Graph."
+    }) "GraphGeneral"
+
 }
 
 function Get-GraphAppInfo
@@ -270,7 +287,7 @@ function Invoke-SettingsUpdated
 
 function Initialize-GraphSettings
 {
-    
+    $script:defaultVersion = ""
 }
 
 function Invoke-GraphRequest
@@ -297,7 +314,7 @@ function Invoke-GraphRequest
             $ODataMetadata = "full", # full, minimal, none or skip
 
             [ValidateSet("beta","v1.0")]
-            $GraphVersion = "beta",
+            $GraphVersion = "",
 
             [switch]
             $AllPages,
@@ -315,6 +332,22 @@ function Invoke-GraphRequest
     if($SkipAuthentication -ne $true)
     {
         Connect-MSALUser
+    }
+
+    if(-not $GraphVersion) 
+    {
+        if(-not $script:defaultVersion)
+        {
+            if((Get-SettingValue "UseGraphV1") -eq $true)
+            {
+                $script:defaultVersion = "v1.0"
+            }
+            else
+            {
+                $script:defaultVersion = "beta"
+            }
+        }
+        $GraphVersion = $script:defaultVersion 
     }
 
     $params = @{}
@@ -392,6 +425,13 @@ function Invoke-GraphRequest
             $url = "$($url.Trim())&"
         }
         $url = "$($url.Trim())`$top=$($PageSize)"
+    }
+
+    $proxyURI = Get-ProxyURI
+    if($proxyURI)
+    {
+        $params.Add("proxy", $proxyURI)
+        $params.Add("UseBasicParsing", $true)
     }
 
     $ret = $null
@@ -1028,6 +1068,12 @@ function Get-GraphMetaData
             [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions")
             $wc = New-Object System.Net.WebClient
             $wc.Encoding = [System.Text.Encoding]::UTF8
+            $proxyURI = Get-ProxyURI
+            if($proxyURI)
+            {
+                $wc.Proxy = $proxyURI
+            }
+            
             try 
             {
                 [xml]$global:metaDataXML = $wc.DownloadString($url)
@@ -1671,6 +1717,7 @@ function Show-GraphImportForm
 
         $importedObjectsCurType = 0
         $navigationPropObjects = @()
+        $arrImportedObjects = @()
         foreach ($fileObj in $filesToImport)
         {
             if($allowUpdate -and $global:cbImportType.SelectedValue -ne "alwaysImport" -and (Reset-GraphObject $fileObj $global:dgObjects.ItemsSource))
@@ -1686,7 +1733,13 @@ function Show-GraphImportForm
                     ImportedObject = $importedObj
                 }
             }
+            $arrImportedObjects += $importedObj
             $importedObjectsCurType++
+        }
+
+        if($global:curObjectType.PostFilesImportCommand)
+        {
+            & $global:curObjectType.PostFilesImportCommand $global:curObjectType $arrImportedObjects $filesToImport
         }
 
         if($importedObjectsCurType -gt 0 -and $global:LoadedDependencyObjects -is [HashTable] -and $global:LoadedDependencyObjects.ContainsKey($global:curObjectType.Id))
@@ -1857,7 +1910,6 @@ function Show-GraphBulkImportForm
 
 function Start-GraphObjectImport
 {
-    
     Write-Status "Import objects" -Block
     Write-Log "****************************************************************"
     Write-Log "Start bulk import"
@@ -1907,6 +1959,8 @@ function Start-GraphObjectImport
 
             $importedObjectsCurType = 0
 
+            $arrImportedObjects = @()
+
             foreach ($fileObj in @($filesToImport))
             {
                 $objName = Get-GraphObjectName $fileObj.Object $item.ObjectType
@@ -1930,9 +1984,15 @@ function Start-GraphObjectImport
                         ImportedObject = $importedObj
                     }
                 }
+                $arrImportedObjects = $importedObj
 
                 $importedObjects++
                 $importedObjectsCurType++
+            }
+
+            if($item.ObjectType.PostFilesImportCommand)
+            {
+                & $item.ObjectType.PostFilesImportCommand $item.ObjectType $arrImportedObjects $filesToImport
             }
 
             if($importedObjectsCurType -gt 0 -and $global:LoadedDependencyObjects -is [HashTable] -and $global:LoadedDependencyObjects.ContainsKey($item.ObjectType.Id))
@@ -2230,6 +2290,11 @@ function Import-GraphFile
             Import-GraphObjectAssignment $newObj $file.ObjectType $objClone.Assignments $file.FileInfo.FullName | Out-Null
         }
 
+        if($newObj)
+        {
+            $file | Add-Member -NotePropertyName "ImportedObject" -NotePropertyValue $newObj
+        }
+
         if($PassThru -eq $true -and $newObj)
         {
             $newObj
@@ -2497,25 +2562,36 @@ function Set-ScopeTags
     else { return }
 
     $scopesIds = @()
-    $loadedScopeTags = $global:LoadedDependencyObjects["ScopeTags"]
-    $usingDefault = (($obj."$scopeTagProperty" | measure).Count -eq 1 -and ($obj."$scopeTagProperty")[0] -eq "0")
-    if($loadedScopeTags -and $global:chkImportScopes.IsChecked -eq $true -and $usingDefault -eq $false -and $loadedScopeTags)
-    {        
-        foreach($scopeId in $obj."$scopeTagProperty")
+    if($global:chkReplaceDependencyIDs.IsChecked -eq $false -and $global:chkReplaceDependencyIDs.IsEnabled -eq $false)
+    {
+        if($global:chkImportScopes.IsChecked -eq $true) 
         {
-            if($scopeId -eq 0) { $scopesIds += "0"; continue } # Add default
-
-            $scopeMigObj = $loadedScopeTags | Where OriginalId -eq $scopeId
-            if($scopeMigObj -and $scopeMigObj.Id)
-            {
-                $scopesIds += "$($scopeMigObj.Id)"
-            }
-            elseif($scopeMigObj)
-            {
-                Write-Log "Could not find a ScopeTag for exported Id '$($obj.Id)' ($($scopeMigObj.Name)). Make sure all ScopeTags are imported into the environment" 2
-            }            
+            $scopesIds += $obj.$scopeTagProperty
         }
     }
+    else
+    {    
+        $loadedScopeTags = $global:LoadedDependencyObjects["ScopeTags"]
+        $usingDefault = (($obj."$scopeTagProperty" | measure).Count -eq 1 -and ($obj."$scopeTagProperty")[0] -eq "0")
+        if($loadedScopeTags -and $global:chkImportScopes.IsChecked -eq $true -and $usingDefault -eq $false -and $loadedScopeTags)
+        {        
+            foreach($scopeId in $obj."$scopeTagProperty")
+            {
+                if($scopeId -eq 0) { $scopesIds += "0"; continue } # Add default
+
+                $scopeMigObj = $loadedScopeTags | Where OriginalId -eq $scopeId
+                if($scopeMigObj -and $scopeMigObj.Id)
+                {
+                    $scopesIds += "$($scopeMigObj.Id)"
+                }
+                elseif($scopeMigObj)
+                {
+                    Write-Log "Could not find a ScopeTag for exported Id '$($obj.Id)' ($($scopeMigObj.Name)). Make sure all ScopeTags are imported into the environment" 2
+                }            
+            }
+        }
+    }
+
     if($scopesIds.Count -eq 0)
     {
         $scopesIds += "0" # Import with Default ScopeTag as default.
@@ -2961,7 +3037,7 @@ function Add-GraphDependencyObjects
     {
         if($global:LoadedDependencyObjects.ContainsKey($dep)) { continue }
 
-        $depObjectType = $global:currentViewObject.ViewItems | Where Id -eq $Dep
+        $depObjectType = $global:viewObjects.ViewItems | Where Id -eq $Dep
 
         if(-not $depObjectType)
         {

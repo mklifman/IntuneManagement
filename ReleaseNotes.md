@@ -1,4 +1,98 @@
 # Release Notes
+## 3.9.2  - 2023-10-17
+
+**New features**
+
+- **Application Content Export - Experimental**<br />
+  - Added support for Exporting Appliction with decrypted content<br />
+  App file can be downloaded during export or from the detail view of the Application<br />
+  Enable "Save Encryption File" and specify "App download folder" in Settings<br />
+  "App download folder" is used for encryption file and manual download<br />
+  File content will be downloaded to the export foler during export<br />
+  Files will be downloaded with .encrypted extension and then decrypted to original file name<br />
+  Please report any issue or any suggestions<br />
+  **NOTE:** This will ONLY work if the encryption file is exported and available<br />
+  
+- **Authentication**<br />
+  - Login with application<br />
+  This will login with specified Azure App ID and Secret/Certificate that is used for Batch processes<br />
+  NOTE: This will require a restart of the app<br />
+  Start with app **must** use -TenantID on command line. AppID and Secret/Certificate can be specified in Settings or command line<br />
+  Example: Start-IntuneManagement.ps1 -tenantId \"&lt;TenantID&gt;\" -appid \"&lt;AppID&gt;\" -secret \"&lt;Secret&gt;\"<br />
+  See *Start-WithApp.cmd* for samle file<br />
+  Based on [Issue 122](https://github.com/Micke-K/IntuneManagement/issues/122) and [Issue 134](https://github.com/Micke-K/IntuneManagement/issues/134)<br />
+
+- **Support for new Settings**<br />
+  - Save encryption file - Saves a json file with encryption data when an application file is uploaded eg created or uploaded in details view<br />
+  - App download folder - Folder where application files should be downloaded and decrypted<br />
+  - Login with App in UI (Preview) - Use app batch login in UI<br />
+  - Use Graph 1.0 (Not Recommended) - Use Graph v1.0 instead of Beta. **Note:** Some features will NOT work in v1.0<br />
+  Based on [Issue 170](https://github.com/Micke-K/IntuneManagement/issues/170)<br />
+
+**Fixes**
+- **Documentation**<br />
+  - Language files re-generated eg Supersedence (preview) -> Supersedence<br />
+  - Added support for documenting "Filter for devices" info for Conditional Access policies<br />
+  Based on [Issue 168](https://github.com/Micke-K/IntuneManagement/issues/168)<br />
+
+- **Custom ADMX Files**<br />
+  - Fixed issues with migrating custom policies between environments (3rd time)<br />
+  Based on [Issue 124](https://github.com/Micke-K/IntuneManagement/issues/124)<br />
+  - Fixed issue when importing ADMX files - Encoding issue eg ADMX/ADML file was UTF8<br />
+  Based on [Issue 169](https://github.com/Micke-K/IntuneManagement/issues/169)<br />
+
+- **Importing Windows LoB Apps**<br />
+  - Fixed issue when importing LoB Apps that was only targeted to System context<br />
+  Available Assignment option was missing after import<br />
+  Based on [Discussion 164](https://github.com/Micke-K/IntuneManagement/discussions/164)<br />
+  - Added support for Depnedency and Supersedence reations at import<br />
+  Application will need to be re-exported since additinal data is added to the export file<br />
+  Based on [Discussion 159](https://github.com/Micke-K/IntuneManagement/discussions/159)<br />
+
+- **Generic**<br />
+  - Fixed issue when compiling Procxy CS file<br />
+  - Tls 1.2 is now enforced.<br />
+  Based on [Discussion 166](https://github.com/Micke-K/IntuneManagement/discussions/166)<br />
+  <br />
+
+## 3.9.1  - 2023-08-30
+
+**New features**
+
+- **Added support for Windows Update Driver Policies**<br />
+
+- **Support for new Settings**<br />
+  - Proxy configuration - If configured, Proxy will be used for authentication, APIs and upload<br />
+  - Disable Write-Error output - Skip PowerShell errors in output<br />
+
+**Default Settings Value Changes**
+  - Conditional Access policies will now be imported as Disabled by default<br />
+  - New import option added: As Exported - Change On to Report-only<br />
+  - This is to avoid being locked out from the tenant when importing Conditional Access policies<br />
+  - Based on [Discussion 139](https://github.com/Micke-K/IntuneManagement/discussions/139)<br />
+
+**Fixes**
+- **Documentation**<br />
+  - Fixed issues with some Feature Updates properties<br />
+  - Added missing strings on Windows Update polices<br />
+  - Regenerated Language files and Translation tables for Template policies<br />
+  Note: Conditional Access string has changed file in background. Please report if there is anything missing<br />
+
+- **Custom ADMX Files**<br />
+  - Fixed issues with migrating custom policies between environments<br />
+  - Case reopened due to something broke the initial functionality<br />
+  - Only custom ADMX policies with #Definition properties can be imported into a new environment<br />
+  - Based on [Issue 124](https://github.com/Micke-K/IntuneManagement/issues/124)<br />
+
+- **Scope Tags**<br />
+  - Fixed issues with importing policies with Scope Tags but they were not set<br />
+  - Based on [Issue 133](https://github.com/Micke-K/IntuneManagement/issues/133)<br />
+
+**Generic**<br />
+  - Remove invalid characters from path.<br />
+  - Based on [Issue 150](https://github.com/Micke-K/IntuneManagement/issues/150)<br />
+  <br />
+
 ## 3.9.0  - 2023-05-04
 
 **New features**
