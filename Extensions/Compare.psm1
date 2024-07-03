@@ -11,7 +11,7 @@ Objects can be compared based on Properties or Documentatation info.
 
 function Get-ModuleVersion
 {
-    '1.0.11'
+    '1.1.0'
 }
 
 function Invoke-InitializeModule
@@ -50,10 +50,19 @@ function Add-CompareProvider
     if($global:compareProviders.Count -eq 0)
     {
         $global:compareProviders += [PSCustomObject]@{
-            Name = "Intune Objects with Exported Files"
+            Name = "Exported Files with Intune Objects (Id)"
             Value = "export"
             ObjectCompare = { Compare-ObjectsBasedonProperty @args }
             BulkCompare = { Start-BulkCompareExportObjects @args }
+            ProviderOptions = "CompareExportOptions"
+            Activate = { Invoke-ActivateCompareWithExportObjects @args }
+        }
+
+        $global:compareProviders += [PSCustomObject]@{
+            Name = "Intune Objects with Exported Files (Name)"
+            Value = "IntuneWithExport"
+            ObjectCompare = { Compare-ObjectsBasedonProperty @args }
+            BulkCompare = { Start-BulkCompareExportIntuneToNamedExportedObjects @args }
             ProviderOptions = "CompareExportOptions"
             Activate = { Invoke-ActivateCompareWithExportObjects @args }
         }
@@ -160,10 +169,10 @@ function Invoke-ViewActivated
 
 function Show-CompareBulkForm
 {
-    $script:form = Get-XamlObject ($global:AppRootFolder + "\Xaml\BulkCompare.xaml") -AddVariables
-    if(-not $script:form) { return }
+    $script:cmpForm = Get-XamlObject ($global:AppRootFolder + "\Xaml\BulkCompare.xaml") -AddVariables
+    if(-not $script:cmpForm) { return }
 
-    $global:cbCompareProvider.ItemsSource = @(($global:compareProviders | Where BulkCompare -ne $null))
+    $global:cbCompareProvider.ItemsSource = @($global:compareProviders)
     $global:cbCompareProvider.SelectedValue = (Get-Setting "Compare" "Provider" "export")
 
     $global:cbCompareSave.ItemsSource = @($script:saveType)
@@ -175,6 +184,11 @@ function Show-CompareBulkForm
     $global:cbCompareCSVDelimiter.ItemsSource = @("", ",",";","-","|")
     $global:cbCompareCSVDelimiter.SelectedValue = (Get-Setting "Compare" "Delimiter" ";")
 
+    $global:chkSkipCompareBasicProperties.IsChecked = (Get-Setting "Compare" "SkipCompareBasicProperties") -eq "true"
+    $global:chkSkipCompareAssignments.IsChecked = (Get-Setting "Compare" "SkipCompareAssignments") -eq "true"
+    $global:chkSkipMissingSourcePolicies.IsChecked = (Get-Setting "Compare" "SkipMissingSourcePolicies") -eq "true"
+    $global:chkSkipMissingDestinationPolicies.IsChecked = (Get-Setting "Compare" "SkipMissingDestinationPolicies") -eq "true"
+    
     $script:compareObjects = @()
     foreach($objType in $global:lstMenuItems.ItemsSource)
     {
@@ -210,16 +224,22 @@ function Show-CompareBulkForm
 
     $global:dgObjectsToCompare.ItemsSource = $script:compareObjects
 
-    Add-XamlEvent $script:form "btnClose" "add_click" {
-        $script:form = $null
+    Add-XamlEvent $script:cmpForm "btnClose" "add_click" {
+        $script:cmpForm = $null
         Show-ModalObject 
     }
 
-    Add-XamlEvent $script:form "btnStartCompare" "add_click" {
+    Add-XamlEvent $script:cmpForm "btnStartCompare" "add_click" {
         Write-Status "Compare objects"
         Save-Setting "Compare" "Provider" $global:cbCompareProvider.SelectedValue
         Save-Setting "Compare" "Type" $global:cbCompareType.SelectedValue
         Save-Setting "Compare" "Delimiter" $global:cbCompareCSVDelimiter.SelectedValue
+
+        Save-Setting "Compare" "SkipCompareBasicProperties" $global:chkSkipCompareBasicProperties.IsChecked
+        Save-Setting "Compare" "SkipCompareAssignments" $global:chkSkipCompareAssignments.IsChecked
+        Save-Setting "Compare" "SkipMissingSourcePolicies" $global:chkSkipMissingSourcePolicies.IsChecked
+        Save-Setting "Compare" "SkipMissingDestinationPolicies" $global:chkSkipMissingDestinationPolicies.IsChecked
+
         if($global:cbCompareProvider.SelectedItem.BulkCompare)
         {
             & $global:cbCompareProvider.SelectedItem.BulkCompare
@@ -229,11 +249,31 @@ function Show-CompareBulkForm
 
     $global:cbCompareProvider.Add_SelectionChanged({        
         Set-CompareProviderOptions $this
-    })       
+    })
+    
+    Add-XamlEvent $script:cmpForm "btnExportSettingsForSilentCompare" "add_click" ({
+        $sf = [System.Windows.Forms.SaveFileDialog]::new()
+        $sf.FileName = "BulkCompare.json"
+        $sf.DefaultExt = "*.json"
+        $sf.Filter = "Json (*.json)|*.json|All files (*.*)|*.*"
+        if($sf.ShowDialog() -eq "OK")
+        {
+            $tmp = [PSCustomObject]@{
+                Name = "ObjectTypes"
+                Type = "Custom"
+                ObjectTypes = @()
+            }
+            foreach($ot in ($global:dgObjectsToCompare.ItemsSource | Where Selected -eq $true))
+            {
+                $tmp.ObjectTypes += $ot.ObjectType.Id
+            }
+            Export-GraphBatchSettings $sf.FileName $script:cmpForm "BulkCompare" @($tmp)
+        }  
+    })
 
     Set-CompareProviderOptions $global:cbCompareProvider
 
-    Show-ModalForm "Bulk Compare Objects" $script:form -HideButtons
+    Show-ModalForm "Bulk Compare Objects" $script:cmpForm -HideButtons
 }
 
 function Set-CompareProviderOptions
@@ -266,7 +306,7 @@ function Set-CompareProviderOptions
     }
     else
     {
-       $global:ccContentProviderOptions.Content = $null 
+        $global:ccContentProviderOptions.Content = $null 
     }
     $global:ccContentProviderOptions.Visibility = (?: ($global:ccContentProviderOptions.Content -eq $null) "Collapsed" "Visible")
 
@@ -586,13 +626,15 @@ function Start-BulkCompareExportObjects
 
                 if(-not $curObject)
                 {
-                    # Add objects that are exported but deleted
-                    Write-Log "Object '$($objName)' with id $($fileObj.Object.Id) not found in Intune. Deleted?" 2
-                    $compareProperties = @([PSCustomObject]@{
-                            Object1Value = $null
-                            Object2Value = (Get-GraphObjectName $fileObj.Object $item.ObjectType)
-                            Match = $false
-                        })
+                    if($global:chkSkipMissingDestinationPolicies.IsChecked -ne $true) {
+                        # Add objects that are exported but deleted
+                        Write-Log "Object '$($objName)' with id $($fileObj.Object.Id) not found in Intune. Deleted?" 2
+                        $compareProperties = @([PSCustomObject]@{
+                                Object1Value = $null
+                                Object2Value = (Get-GraphObjectName $fileObj.Object $item.ObjectType)
+                                Match = $false
+                            })
+                    }
                 }
                 else
                 {
@@ -610,27 +652,29 @@ function Start-BulkCompareExportObjects
                 }                
             }
 
-            foreach($graphObj in $graphObjects)
-            {
-                # Add objects that are not exported
-                if(($compareObjectsResult | Where { $_.Id -eq $graphObj.Id})) { continue }
-
-                $objName = Get-GraphObjectName $graphObj.Object $item.ObjectType
-                if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
+            if($global:chkSkipMissingSourcePolicies.IsChecked -ne $true) {
+                foreach($graphObj in $graphObjects)
                 {
-                    continue
-                }                 
+                    # Add objects that are in Intune but not exported
+                    if(($compareObjectsResult | Where { $_.Id -eq $graphObj.Id})) { continue }
 
-                $compareObjectsResult += [PSCustomObject]@{
-                    Object1 = $curObject.Object
-                    Object2 = $null
-                    ObjectType = $item.ObjectType
-                    Id = $graphObj.Id
-                    Result = @([PSCustomObject]@{
-                        Object1Value = $objName
-                        Object2Value = $null
-                        Match = $false
-                    })
+                    $objName = Get-GraphObjectName $graphObj.Object $item.ObjectType
+                    if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
+                    {
+                        continue
+                    }                 
+
+                    $compareObjectsResult += [PSCustomObject]@{
+                        Object1 = $curObject.Object
+                        Object2 = $null
+                        ObjectType = $item.ObjectType
+                        Id = $graphObj.Id
+                        Result = @([PSCustomObject]@{
+                            Object1Value = $objName
+                            Object2Value = $null
+                            Match = $false
+                        })
+                    }
                 }
             }
 
@@ -684,6 +728,193 @@ function Start-BulkCompareExportObjects
         [System.Windows.MessageBox]::Show("No objects were comparced. Verify folder and exported files", "Error", "OK", "Error")
     }
 }
+
+function Start-BulkCompareExportIntuneToNamedExportedObjects
+{
+    Write-Log "****************************************************************"
+    Write-Log "Start bulk compare Intune with Exported Objects compare"
+    Write-Log "****************************************************************"
+    $compareObjectsResult = @()
+
+    $txtNameFilter = (Get-XamlProperty $global:ccContentProviderOptions.Content "txtCompareNameFilter" "Text")
+    if($txtNameFilter -is [String])
+    {
+        $txtNameFilter = $txtNameFilter.Trim()
+    }
+    $rootFolder = (Get-XamlProperty $global:ccContentProviderOptions.Content "txtExportPath" "Text")
+    
+    $compareProps = $script:defaultCompareProps
+    
+    foreach($removeProp in $global:cbCompareProvider.SelectedItem.RemoveProperties)
+    {
+        $compareProps.Remove($removeProp) | Out-Null
+    }
+
+    foreach($removeProp in $global:cbCompareType.SelectedItem.RemoveProperties)
+    {
+        $compareProps.Remove($removeProp) | Out-Null
+    }
+
+    if(-not $rootFolder)
+    {
+        [System.Windows.MessageBox]::Show("Root folder must be specified", "Error", "OK", "Error")
+        return
+    }
+
+    if([IO.Directory]::Exists($rootFolder) -eq $false)
+    {
+        [System.Windows.MessageBox]::Show("Root folder $rootFolder does not exist", "Error", "OK", "Error")
+        return
+    }
+    
+    $outputType = $global:cbCompareSave.SelectedValue
+    Save-Setting "Compare" "SaveType" $outputType
+
+    $compResultValues = @()
+
+    foreach($item in ($global:dgObjectsToCompare.ItemsSource | where Selected -eq $true))
+    { 
+        Write-Status "Compare $($item.ObjectType.Title) objects" -Force -SkipLog
+        Write-Log "----------------------------------------------------------------"
+        Write-Log "Compare $($item.ObjectType.Title) objects"
+        Write-Log "----------------------------------------------------------------"
+
+        $folder = Join-Path $rootFolder $item.ObjectType.Id
+        
+        if([IO.Directory]::Exists($folder))
+        {
+            Save-Setting "" "LastUsedFullPath" $folder
+        
+            [array]$graphObjects = Get-GraphObjects -property $item.ObjectType.ViewProperties -objectType $item.ObjectType
+
+            $fileObjects = @(Get-GraphFileObjects $folder -ObjectType $item.ObjectType)
+
+            foreach ($graphObject in @($graphObjects))
+            {                
+                $objName = Get-GraphObjectName $graphObject.Object $graphObject.ObjectType
+
+                if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
+                {
+                    continue
+                }
+                                
+                $fileObj = $fileObjects | Where { (Get-GraphObjectName $_.Object $_.ObjectType) -eq $objName }
+
+                if(-not $fileObj)
+                {
+                    # Add objects that are exported but deleted
+                    if($global:chkSkipMissingDestinationPolicies.IsChecked -ne $true) {
+                        Write-Log "Object '$($objName)' with id $($fileObj.Object.Id) not found in exported folder. New Object?" 2
+                        $compareProperties = @([PSCustomObject]@{
+                                Object1Value = $objName
+                                Object2Value = $null
+                                Match = $false
+                            })
+                    }
+                }
+                elseif(($fileObj | measure).Count -gt 1)
+                {
+                    # Add objects that are exported but deleted
+                    Write-Log "Multiple exported objects found with name '$($objName)" 2
+                    $compareProperties = @([PSCustomObject]@{
+                            Object1Value = $objName
+                            Object2Value = $null
+                            Match = $false
+                        })
+                }
+                else
+                {
+                    $sourceObj = Get-GraphObject $graphObject.Object $graphObject.ObjectType
+                    $fileObj.Object | Add-Member Noteproperty -Name "@ObjectFromFile" -Value $true -Force 
+                    $compareProperties = Compare-Objects $sourceObj.Object $fileObj.Object $item.ObjectType
+                }
+
+                $compareObjectsResult += [PSCustomObject]@{
+                    Object1 = $graphObject.Object
+                    Object2 = $fileObj.Object
+                    ObjectType = $item.ObjectType
+                    Id = $graphObject.Object.Id
+                    Result = $compareProperties
+                }                
+            }
+
+            if($global:chkSkipMissingSourcePolicies.IsChecked -ne $true) {
+                foreach ($fileObj in @($fileObjects))
+                {
+                    # Add objects that are exported but not in Intune
+                    if(($compareObjectsResult | Where { $_.FileInfo.FullName -eq $fileObj.FileInfo.FullName})) { continue }
+
+                    $objName = Get-GraphObjectName $fileObj.Object $item.ObjectType
+                    if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
+                    {
+                        continue
+                    }                 
+
+                    $compareObjectsResult += [PSCustomObject]@{
+                        Object1 = $null
+                        Object2 = $fileObj.Object
+                        ObjectType = $item.ObjectType
+                        Id = $fileObj.Object.Id
+                        Result = @([PSCustomObject]@{
+                            Object1Value = $objName
+                            Object2Value = $null
+                            Match = $false
+                        })
+                    }
+                }
+            }
+
+            if($outputType -eq "objectType")
+            {
+                $compResultValues = @()
+            }
+
+            foreach($compObj in @($compareObjectsResult | Where { $_.ObjectType.Id -eq $item.ObjectType.Id }))
+            {
+                $objName = Get-GraphObjectName $item.Object $item.ObjectType
+                foreach($compValue in $compObj.Result)
+                {
+                    $compResultValues += [PSCustomObject]@{
+                        ObjectName = $objName
+                        Id = $compObj.Id
+                        Type = $compObj.ObjectType.Title
+                        ODataType = $compObj.Object1.'@OData.Type'
+                        Property = $compValue.PropertyName
+                        Value1 = $compValue.Object1Value
+                        Value2 = $compValue.Object2Value
+                        Category = $compValue.Category
+                        SubCategory = $compValue.SubCategory
+                        Match = $compValue.Match
+                    }
+                }
+            }
+
+            if($outputType -eq "objectType")
+            {
+                Save-BulkCompareResults $compResultValues (Join-Path $folder "Compare_$(((Get-Date).ToString("yyyyMMdd-HHmm"))).csv") $compareProps
+            }
+        }
+        else
+        {
+            Write-Log "Folder $folder not found. Skipping compare" 2    
+        }
+    }
+
+    if($outputType -eq "all" -and $compResultValues.Count -gt 0)
+    {
+        Save-BulkCompareResults $compResultValues (Join-Path $rootFolder "Compare_$(((Get-Date).ToString("yyyyMMDD-HHmm"))).csv") $compareProps
+    }    
+
+    Write-Log "****************************************************************"
+    Write-Log "Bulk compare Intune with Exported Objects finished"
+    Write-Log "****************************************************************"
+    Write-Status ""
+    if($compareObjectsResult.Count -eq 0)
+    {
+        [System.Windows.MessageBox]::Show("No objects were comparced. Verify folder and exported files", "Error", "OK", "Error")
+    }
+}
+
 
 function Start-BulkCompareExportFolders
 {
@@ -765,13 +996,15 @@ function Start-BulkCompareExportFolders
 
                 if(-not $compareObject)
                 {
-                    # Add objects that are exported but deleted
-                    Write-Log "Object '$($objName)' with id $($fileSourceObj.Object.Id) not found in Intune. Deleted?" 2
-                    $compareProperties = @([PSCustomObject]@{
-                            Object1Value = $null
-                            Object2Value = (Get-GraphObjectName $fileSourceObj.Object $fileSourceObj.ObjectType)
-                            Match = $false
-                        })
+                    if($global:chkSkipMissingDestinationPolicies.IsChecked -ne $true) {
+                        # Add objects that are exported but deleted
+                        Write-Log "Object '$($objName)' with id $($fileSourceObj.Object.Id) not found in Intune. Deleted?" 2
+                        $compareProperties = @([PSCustomObject]@{
+                                Object1Value = $null
+                                Object2Value = (Get-GraphObjectName $fileSourceObj.Object $fileSourceObj.ObjectType)
+                                Match = $false
+                            })
+                    }
                 }
                 else
                 {
@@ -789,27 +1022,29 @@ function Start-BulkCompareExportFolders
                 }                
             }
 
-            foreach($fileCompareObj in $fileCompareObjs)
-            {                
-                # Add objects that were not exported in source folder
-                if(($compareObjectsResult | Where { $_.Id -eq $fileCompareObj.Object.Id})) { continue }
+            if($global:chkSkipMissingSourcePolicies.IsChecked -ne $true) {
+                foreach($fileCompareObj in $fileCompareObjs)
+                {                
+                    # Add objects that were not exported in source folder
+                    if(($compareObjectsResult | Where { $_.Id -eq $fileCompareObj.Object.Id})) { continue }
 
-                $objName = Get-GraphObjectName $fileCompareObj.Object $item.ObjectType
-                if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
-                {
-                    continue
-                }                
+                    $objName = Get-GraphObjectName $fileCompareObj.Object $item.ObjectType
+                    if($txtNameFilter -and $objName -notmatch [RegEx]::Escape($txtNameFilter))
+                    {
+                        continue
+                    }                
 
-                $compareObjectsResult += [PSCustomObject]@{
-                    Object1 = $fileCompareObj.Object
-                    Object2 = $null
-                    ObjectType = $item.ObjectType
-                    Id = $fileCompareObj.Object.Id
-                    Result = @([PSCustomObject]@{
-                        Object1Value = (Get-GraphObjectName $fileCompareObj.Object $item.ObjectType)
-                        Object2Value = $null
-                        Match = $false
-                    })
+                    $compareObjectsResult += [PSCustomObject]@{
+                        Object1 = $fileCompareObj.Object
+                        Object2 = $null
+                        ObjectType = $item.ObjectType
+                        Id = $fileCompareObj.Object.Id
+                        Result = @([PSCustomObject]@{
+                            Object1Value = (Get-GraphObjectName $fileCompareObj.Object $item.ObjectType)
+                            Object2Value = $null
+                            Match = $false
+                        })
+                    }
                 }
             }
 
@@ -1114,12 +1349,12 @@ function Set-ColumnVisibility
 
 function Add-CompareProperty
 {
-    param($name, $value1, $value2, $category, $subCategory, $match = $null)
+    param($name, $value1, $value2, $category, $subCategory, $match = $null, [switch]$skip)
 
     $value1 = if($value1 -eq $null) { "" } else { $value1.ToString().Trim("`"") }
     $value2 = if($value2 -eq $null) { "" } else {  $value2.ToString().Trim("`"") }
 
-    $script:compareProperties += [PSCustomObject]@{
+    $compare += [PSCustomObject]@{
         PropertyName = $name
         Object1Value = $value1 #if($value1 -ne $null) { $value1.ToString().Trim("`"") } else { "" }
         Object2Value = $value2 #if($value2 -ne $null) { $value2.ToString().Trim("`"") } else { "" }
@@ -1127,6 +1362,11 @@ function Add-CompareProperty
         SubCategory = $subCategory
         Match = ?? $match ($value1 -eq $value2)
     }
+    if($skip -eq $true) {
+        $compare.Match = $null
+    }
+
+    $script:compareProperties += $compare
 }
 
 function Compare-ObjectsBasedonProperty
@@ -1137,8 +1377,17 @@ function Compare-ObjectsBasedonProperty
 
     Set-ColumnVisibility $false
 
+    $skipBasicProperties = Get-XamlProperty $script:cmpForm "chkSkipCompareBasicProperties" "IsChecked"    
+
     $coreProps = @((?? $objectType.NameProperty "displayName"), "Description", "Id", "createdDateTime", "lastModifiedDateTime", "version")
     $postProps = @("Advertisements")
+    $skipProps = @("@ObjectFromFile")
+    $skipPropertiesToCompare = @()
+    if($skipBasicProperties) {
+        $skipPropertiesToCompare += "roleScopeTagIds"
+        $skipPropertiesToCompare += "roleScopeTags"
+    }
+
 
     foreach ($propName in $coreProps)
     {
@@ -1148,7 +1397,7 @@ function Compare-ObjectsBasedonProperty
         }
         $val1 = ($obj1.$propName | ConvertTo-Json -Depth 10)
         $val2 = ($obj2.$propName | ConvertTo-Json -Depth 10)
-        Add-CompareProperty $propName $val1 $val2
+        Add-CompareProperty $propName $val1 $val2 -Skip:($skipBasicProperties -eq $true)
     }    
 
     $addedProps = @()
@@ -1156,28 +1405,31 @@ function Compare-ObjectsBasedonProperty
     {
         if($propName -in $coreProps) { continue }
         if($propName -in $postProps) { continue }
+        if($propName -in $skipProps) { continue }
 
         if($propName -like "*@OData*" -or $propName -like "#microsoft.graph*") { continue }
 
         $addedProps += $propName
         $val1 = ($obj1.$propName | ConvertTo-Json -Depth 10)
         $val2 = ($obj2.$propName | ConvertTo-Json -Depth 10)
-        Add-CompareProperty $propName $val1 $val2
+        Add-CompareProperty $propName $val1 $val2 -Skip:($skipPropertiesToCompare -contains $propName)
     }
 
     foreach ($propName in ($obj2.PSObject.Properties | Select Name).Name) 
     {
         if($propName -in $coreProps) { continue }
         if($propName -in $postProps) { continue }
+        if($propName -in $skipProps) { continue }
         if($propName -in $addedProps) { continue }
 
         if($propName -like "*@OData*" -or $propName -like "#microsoft.graph*") { continue }
 
         $val1 = ($obj1.$propName | ConvertTo-Json -Depth 10)
         $val2 = ($obj2.$propName | ConvertTo-Json -Depth 10)
-        Add-CompareProperty $propName $val1 $val2
+        Add-CompareProperty $propName $val1 $val2 -Skip:($skipPropertiesToCompare -contains $propName)
     }    
 
+    $skipAssignments = Get-XamlProperty $script:cmpForm "chkSkipCompareAssignments" "IsChecked"
     foreach ($propName in $postProps)
     {
         if(-not ($obj1.PSObject.Properties | Where Name -eq $propName))
@@ -1186,7 +1438,7 @@ function Compare-ObjectsBasedonProperty
         }
         $val1 = ($obj1.$propName | ConvertTo-Json -Depth 10)
         $val2 = ($obj2.$propName | ConvertTo-Json -Depth 10)
-        Add-CompareProperty $propName $val1 $val2
+        Add-CompareProperty $propName $val1 $val2 -Skip:($skipAssignments -eq $true)
     }
     
     $script:compareProperties
@@ -1230,10 +1482,12 @@ function Compare-ObjectsBasedonDocumentation
 
     $settingsValue = ?? $objectType.CompareValue "Value"
 
+    $skipBasicProperties = Get-XamlProperty $script:cmpForm "chkSkipCompareBasicProperties" "IsChecked"    
+
     if($docObj1.BasicInfo -and -not ($docObj1.BasicInfo | where Value -eq $obj1.Id))
     {
         # Make sure the Id property is included
-        Add-CompareProperty "Id" $obj1.Id $obj2.Id $docObj1.BasicInfo[0].Category
+        Add-CompareProperty "Id" $obj1.Id $obj2.Id $docObj1.BasicInfo[0].Category -Skip:($skipBasicProperties -eq $true)
     }
 
     foreach ($prop in $docObj1.BasicInfo)
@@ -1241,7 +1495,7 @@ function Compare-ObjectsBasedonDocumentation
         $val1 = $prop.Value 
         $prop2 = $docObj2.BasicInfo | Where Name -eq $prop.Name
         $val2 = $prop2.Value 
-        Add-CompareProperty $prop.Name $val1 $val2 $prop.Category
+        Add-CompareProperty $prop.Name $val1 $val2 $prop.Category -Skip:($skipBasicProperties -eq $true)
     }
 
     $addedProperties = @()
@@ -1250,11 +1504,16 @@ function Compare-ObjectsBasedonDocumentation
     {
         foreach ($prop in $docObj1.Settings)
         {
-            if(($prop.SettingId + $prop.ParentSettingId) -in $addedProperties) { continue }
+            if(($prop.SettingId + $prop.ParentSettingId + $prop.RowIndex) -in $addedProperties) { continue }
 
-            $addedProperties += ($prop.SettingId + $prop.ParentSettingId)
+            $addedProperties += ($prop.SettingId + $prop.ParentSettingId + $prop.RowIndex)
             $val1 = $prop.Value 
-            $prop2 = $docObj2.Settings | Where { $_.SettingId -eq $prop.SettingId -and $_.ParentSettingId -eq $prop.ParentSettingId }
+            $prop2 = $docObj2.Settings | Where { $_.SettingId -eq $prop.SettingId -and $_.ParentSettingId -eq $prop.ParentSettingId -and $_.RowIndex -eq $prop.RowIndex }
+            if($val1 -isnot [Array] -and $prop2.Value -is [Array])
+            {
+                Write-Log "Compare property for $($prop.SettingId) found based on value" 2
+                $prop2 = $prop2 | Where Value -eq $val1
+            }
             $val2 = $prop2.Value
             Add-CompareProperty $prop.Name $val1 $val2 $prop.Category
 
@@ -1265,12 +1524,18 @@ function Compare-ObjectsBasedonDocumentation
             # Add children defined on Object 1 property
             foreach ($childProp in $children1)
             {
-                if(($childProp.SettingId + $childProp.ParentSettingId) -in $addedProperties) { continue }
+                if(($childProp.SettingId + $childProp.ParentSettingId + $childProp.RowIndex) -in $addedProperties) { continue }
 
-                $addedProperties += ($childProp.SettingId + $childProp.ParentSettingId)
+                $addedProperties += ($childProp.SettingId + $childProp.ParentSettingId + $childProp.RowIndex)
                 $val1 = $childProp.Value 
-                $prop2 = $docObj2.Settings | Where { $_.SettingId -eq $childProp.SettingId -and $_.ParentSettingId -eq $childProp.ParentSettingId }
+                $prop2 = $docObj2.Settings | Where { $_.SettingId -eq $childProp.SettingId -and $_.ParentSettingId -eq $childProp.ParentSettingId -and $_.RowIndex -eq $childProp.RowIndex}
+                if($val1 -isnot [Array] -and $prop2.Value -is [Array])
+                {
+                    Write-Log "Compare property for $($childProp.SettingId) found based on value" 2
+                    $prop2 = $prop2 | Where Value -eq $val1
+                }
                 $val2 = $prop2.Value
+
                 Add-CompareProperty $childProp.Name $val1 $val2 $prop.Category
             }
             
@@ -1278,11 +1543,16 @@ function Compare-ObjectsBasedonDocumentation
             # This is to make sure all children are added under its parent and not last in the table
             foreach ($childProp in $children2)
             {
-                if(($childProp.SettingId + $childProp.ParentSettingId) -in $addedProperties) { continue }
+                if(($childProp.SettingId + $childProp.ParentSettingId + $childProp.RowIndex) -in $addedProperties) { continue }
 
-                $addedProperties += ($childProp.SettingId + $childProp.ParentSettingId)
+                $addedProperties += ($childProp.SettingId + $childProp.ParentSettingId + $childProp.RowIndex)
                 $val2 = $childProp.Value 
-                $prop2 = $docObj1.Settings | Where { $_.SettingId -eq $childProp.SettingId -and $_.ParentSettingId -eq $childProp.ParentSettingId }
+                $prop2 = $docObj1.Settings | Where { $_.SettingId -eq $childProp.SettingId -and $_.ParentSettingId -eq $childProp.ParentSettingId -and $_.RowIndex -eq $childProp.RowIndex }
+                if($val2 -isnot [Array] -and $prop2.Value -is [Array])
+                {
+                    Write-Log "Compare property for $($childProp.SettingId) found based on value" 2
+                    $prop2 = $prop2 | Where Value -eq $val1
+                }
                 $val1 = $prop2.Value
                 Add-CompareProperty $childProp.Name $val1 $val2 $prop.Category
             }
@@ -1291,12 +1561,17 @@ function Compare-ObjectsBasedonDocumentation
         # These objects are defined only on Object 2. They will be last in the table
         foreach ($prop in $docObj2.Settings)
         {
-            if(($prop.SettingId + $prop.ParentSettingId) -in $addedProperties) { continue }
+            if(($prop.SettingId + $prop.ParentSettingId + $prop.RowIndex) -in $addedProperties) { continue }
 
-            $addedProperties += ($prop.SettingId + $prop.ParentSettingId)
+            $addedProperties += ($prop.SettingId + $prop.ParentSettingId + $prop.RowIndex)
             $val2 = $prop.Value    
-            $prop2 = $docObj1.Settings | Where  { $_.SettingId -eq $prop.SettingId -and $_.ParentSettingId -eq $prop.ParentSettingId }
-            $val1 = $prop2.Value   
+            $prop2 = $docObj1.Settings | Where  { $_.SettingId -eq $prop.SettingId -and $_.ParentSettingId -eq $prop.ParentSettingId -and $_.RowIndex -eq $childProp.RowIndex }
+            if($val2 -isnot [Array] -and $prop2.Value -is [Array])
+            {
+                Write-Log "Compare property for $($prop.SettingId) found based on value" 2
+                $prop2 = $prop2 | Where Value -eq $val2
+            }
+            $val1 = $prop2.Value
             Add-CompareProperty $prop.Name $val1 $val2 $prop.Category
         }    
     }
@@ -1464,12 +1739,56 @@ function Add-AssignmentInfo
         $val2 = $tmpVal
     }
 
+    $skipAssignments = Get-XamlProperty $script:cmpForm "chkSkipCompareAssignments" "IsChecked"
+
     if($assignment.RawIntent)
     {
-        Add-CompareProperty $assignment.Category $val1 $val2 -Category $assignment.GroupMode -match $match
+        Add-CompareProperty $assignment.Category $val1 $val2 -Category $assignment.GroupMode -match $match  -Skip:($skipAssignments -eq $true)
     }
     else
     {
-        Add-CompareProperty $assignmentStr $val1 $val2 -Category $assignment.GroupMode -match $match
+        Add-CompareProperty $assignmentStr $val1 $val2 -Category $assignment.GroupMode -match $match -Skip:($skipAssignments -eq $true)
     }
 }
+
+function Invoke-SilentBatchJob
+{
+    param($settingsObj)
+
+    if(-not $global:MSALToken) { return } # Skip if not authenticated
+
+    if($settingsObj.BulkCompare)
+    {
+        $global:currentViewObject =  $global:viewObjects | Where { $_.ViewInfo.ID -eq "IntuneGraphAPI" }
+
+        $script:cmpForm = Get-XamlObject ($global:AppRootFolder + "\Xaml\BulkCompare.xaml") -AddVariables
+        if(-not $script:cmpForm) { return }
+
+        $script:compareObjects = Get-GraphBatchObjectTypes $settingsObj.BulkCompare        
+
+        $global:cbCompareProvider.ItemsSource = @($global:compareProviders)
+        $global:cbCompareProvider.SelectedValue = ($settingsObj.BulkCompare | Where Name -eq "cbCompareProvider").Value
+    
+        $global:cbCompareSave.ItemsSource = @($script:saveType)
+        $global:cbCompareSave.SelectedValue = ($settingsObj.BulkCompare | Where Name -eq "cbCompareSave").Value
+    
+        $global:cbCompareType.ItemsSource = $global:comparisonTypes | Where ShowOnBulk -ne $false 
+        $global:cbCompareType.SelectedValue = ($settingsObj.BulkCompare | Where Name -eq "cbCompareType").Value
+    
+        $global:cbCompareCSVDelimiter.ItemsSource = @("", ",",";","-","|")
+        $global:cbCompareCSVDelimiter.SelectedValue = ($settingsObj.BulkCompare | Where Name -eq "cbCompareCSVDelimiter").Value
+        
+        Set-CompareProviderOptions $global:cbCompareProvider
+
+        Set-BatchProperties $settingsObj.BulkCompare $script:cmpForm -SkipMissingControlWarning        
+        Set-BatchProperties $settingsObj.BulkCompare $global:ccContentProviderOptions.Content -SkipMissingControlWarning
+
+        $global:dgObjectsToCompare.ItemsSource = @($script:compareObjects)
+    
+        if($global:cbCompareProvider.SelectedItem.BulkCompare)
+        {
+            & $global:cbCompareProvider.SelectedItem.BulkCompare
+        }    
+    }
+}
+

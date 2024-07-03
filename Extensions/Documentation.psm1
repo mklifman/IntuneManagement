@@ -20,7 +20,7 @@ $global:documentationProviders = @()
 
 function Get-ModuleVersion
 {
-    '2.0.2'
+    '2.2.1'
 }
 
 function Invoke-InitializeModule
@@ -228,6 +228,7 @@ function Get-ObjectDocumentation
     $script:applicabilityRules = @()
     $script:objectAssignments = @()
     $script:objectScripts = @()
+    $script:admxCategories = $null
 
     $script:ObjectTypeFullTable = @{} # Hash table with objects that should be documented in a single table eg ScopeTags
 
@@ -384,6 +385,7 @@ function Invoke-ObjectDocumentation
     $global:catRecommendedSettings = $null
     $global:intentCategoryDefs = $null
     $global:cfgCategories = $null
+    $script:admxCategories = $null
 
     $script:DocumentationLanguage = "en"        
     $script:objectSeparator = [System.Environment]::NewLine
@@ -827,6 +829,10 @@ function Get-ObjectPlatformFromType
     {
         $platform = "Windows10"
     }
+    elseif($lowerAppType.Contains("androidForWork"))
+    {
+        $platform = "androidForWork"
+    }
     elseif($lowerAppType.Contains("android"))
     {
         $platform = "Android"
@@ -879,7 +885,8 @@ function Invoke-TranslateADMXObject
     {
         if(-not $definitionValue.definition -and $definitionValues.'definition@odata.bind')
         {
-            $definition = Invoke-GraphRequest -Url $definitionValue.'definition@odata.bind' -ODataMetadata "minimal" @params
+            $url = $definitionValue.'definition@odata.bind' -replace $global:graphURL, ("https://$((?? $global:MSALGraphEnvironment "graph.microsoft.com"))/beta")
+            $definition = Invoke-GraphRequest -Url $url -ODataMetadata "minimal" @params
             if($definition)
             {
                 $definitionValue | Add-Member -MemberType NoteProperty -Name "definition" -Value $definition
@@ -1053,15 +1060,40 @@ function Invoke-TranslateSettingsObject
     #>
     $cfgSettings = (Invoke-GraphRequest "/deviceManagement/configurationPolicies('$($obj.Id)')/settings?`$expand=settingDefinitions&top=1000" -ODataMetadata "minimal" @params).Value
 
+    if($obj.'@ObjectFromFile')
+    {
+        $cfgSettings = $obj.Settings
+    }
+
     if(-not $global:cfgCategories)
     {
         $global:cfgCategories = (Invoke-GraphRequest "/deviceManagement/configurationCategories?`$filter=platforms has 'windows10' and technologies has 'mdm'" -ODataMetadata "minimal" @params).Value
     }
 
+    if(-not $global:cachedCfgSettings) 
+    {
+        $global:cachedCfgSettings = @{}
+    }
+
     $script:settingCatalogasCategories = @{}
     foreach($cfgSetting in $cfgSettings)
     {
-        $defObj = $cfgSetting.settingDefinitions | Where id -eq $cfgSetting.settingInstance.settingDefinitionId
+        if($obj.'@ObjectFromFile' -and -not $cfgSetting.settingDefinitions) 
+        {
+            if($global:cachedCfgSettings.ContainsKey($cfgSetting.settingInstance.settingDefinitionId) -eq $false) 
+            {
+                $defObj = Invoke-GraphRequest "/deviceManagement/configurationSettings/$($cfgSetting.settingInstance.settingDefinitionId)"
+                $global:cachedCfgSettings.Add($defObj.Id, $defObj)
+            }
+        }
+        else
+        {
+            $defObj = $cfgSetting.settingDefinitions | Where id -eq $cfgSetting.settingInstance.settingDefinitionId
+            if($global:cachedCfgSettings.ContainsKey($cfgSetting.settingInstance.settingDefinitionId) -eq $false) 
+            {                
+                $global:cachedCfgSettings.Add($defObj.Id, $defObj)
+            }
+        }
         #$defObj = $cfgSetting.settingDefinitions | Where { $_.id -eq $cfgSetting.settingInstance.settingDefinitionId -or $_.id -eq $cfgSettings.settingInstanceTemplate.settingDefinitionId }
         if(-not $defObj -or $script:settingCatalogasCategories.ContainsKey($defObj.categoryId)) { continue }
 
@@ -1074,13 +1106,13 @@ function Invoke-TranslateSettingsObject
             Category=$catObj
             #Settings=$catSettings
             RootCategory=$rootCatObj
-         }))
+        }))
     }
 
     $script:curSettingsCatologPolicy = @()
 
     $cfgSettings | % { Add-SettingsSetting $_.settingInstance $_.settingDefinitions } | Out-Null
- 
+
     #$script:objectSettingsData = $script:curSettingsCatologPolicy
     
     foreach($item in ($script:curSettingsCatologPolicy | Select @{l="CategoryID";e={$_.CategoryDefinition.Id}}, @{l="SubCategoryID";e={$_.SubCategoryDefinition.Id}} -Unique))
@@ -1108,6 +1140,18 @@ function Add-SettingsSetting
     $childSettings = @()
 
     $settingsDef = $settingsDefs | Where id -eq $settingInstance.settingDefinitionId
+    if(-not $settingsDef -and $settingInstance.settingDefinitionId) 
+    {
+        if($global:cachedCfgSettings.ContainsKey($settingInstance.settingDefinitionId) -eq $false) 
+        {
+            $settingsDef = Invoke-GraphRequest "/deviceManagement/configurationSettings/$($settingInstance.settingDefinitionId)"
+            $global:cachedCfgSettings.Add($settingInstance.settingDefinitionId, $settingsDef)
+        }
+        else
+        {
+            $settingsDef = $global:cachedCfgSettings[$settingInstance.settingDefinitionId]
+        }        
+    }
     $categoryDef = $global:cfgCategories | Where Id -eq $settingsDef.categoryId #$script:settingCatalogasCategories[$settingsDef.categoryId]
 
     if($settingsDef.categoryId -ne $categoryDef.rootCategoryId)
@@ -1124,6 +1168,7 @@ function Add-SettingsSetting
 
     $settingInfo = [PSCustomObject]@{
         SettingId = $settingsDef.Id
+        SettingKey = ""
         SettingName = $settingsDef.Name
         Name = $settingsDef.displayName
         Description=$settingsDef.description
@@ -1142,6 +1187,7 @@ function Add-SettingsSetting
         Show = $show
         Type = $settingInstance.'@odata.type'
         PropertyIndex = 0
+        RowIndex = 0
         ChildSettings = @() #($childSettings | Sort DisplayName)
     }
 
@@ -1207,13 +1253,13 @@ function Add-SettingsSetting
         {
             $childSettingsArr = @()
             # Not sure if this is the best way but it looks better for tested policies
-            if($script:currentObject.templateReference.templateId)
+            if($script:currentObject.templateReference.templateId -and $settingsDefs)
             {
                 $childIDs = $settingsDefs.id # Endpoint Security objects
             }
             else
             {
-                $childIDs = $settingsDef.childIds # Setings Catalog
+                $childIDs = $settingsDef.childIds # Setings Catalog and from file documentation
             }
             #foreach($childId in $settingsDefs.id) #$settingsDef.childIds)
             foreach($childId in $childIDs)            
@@ -1224,6 +1270,7 @@ function Add-SettingsSetting
                 if($tmpSetting)
                 {
                     $tmpSetting.Parent = $childSettings
+                    $tmpSetting.RowIndex = $index
                     $childSettings += $tmpSetting
                     $childSettingsArr += $tmpSetting
                     if($settingsDef.childIds.Count -gt 1)
@@ -1231,6 +1278,7 @@ function Add-SettingsSetting
                         $tmpSetting.PropertyIndex = $childSettingsArr.Count
                     }
                 }
+                $rowIndex++
             }
 
             $settingInfo.ChildSettings += [PSCustomObject]@{
@@ -1346,6 +1394,7 @@ function Get-IntentCategory
         return (Get-LanguageString "SecurityTemplate.firewall")
     }
     elseif($templateType -eq "securityBaseline" -or 
+        $templateType -eq "baseline" -or
         $templateType -eq "advancedThreatProtectionSecurityBaseline" -or
         $templateType -eq "microsoftEdgeSecurityBaseline")
     {
@@ -1871,7 +1920,7 @@ function Invoke-TranslateProfileObject
     }
     else
     {
-        # Shuld only be one file. Compliance policies might have more
+        # Should only be one file. Compliance policies might have more
         $files = [IO.Directory]::EnumerateFiles($global:AppRootFolder + "\Documentation\ObjectInfo", "*_$($objInfo.PolicyType).json")
         if(($files | measure).Count -eq 0)
         {
@@ -1924,7 +1973,8 @@ function Get-LanguageString
 
     if(-not $script:languageStrings)
     {
-        $fileContent = Get-Content ($global:AppRootFolder + "\Documentation\Strings-$($script:DocumentationLanguage).json") -Encoding UTF8
+        $lng = ?? $script:DocumentationLanguage "en"
+        $fileContent = Get-Content ($global:AppRootFolder + "\Documentation\Strings-$($lng).json") -Encoding UTF8
         $script:languageStrings =  $fileContent | ConvertFrom-Json
     }
 
@@ -2088,6 +2138,7 @@ function Invoke-TranslateSection
         if($prop.dataType -eq 8)
         {
             if($prop.nameResourceKey -eq "LearnMore") { continue }
+            elseif($prop.nameResourceKey -eq "Empty") { $script:CurrentSubCategory = $null }
             elseif($prop.nameResourceKey -in $script:categoriesToIgnore) { continue }
             elseif($prop.nameResourceKey)
             {
@@ -2608,7 +2659,8 @@ function Get-PropertyInfo
         RawJsonValue=$jsonValue
         DefaultValue=$defValue
         FullValueTable = $tableValue 
-        UnconfiguredValue=$prop.unconfiguredValue
+        UnconfiguredValue = $prop.unconfiguredValue
+        AlwaysAddValue = $prop.alwaysAddValue -eq $true
         Enabled=$prop.Enabled 
         EntityKey=$prop.EntityKey
         Level=$script:propLevel
@@ -4432,7 +4484,7 @@ function local:Invoke-StartDocumentatiom
     # Add each object to the documentation
     foreach($curGroupId in ($sourceList.ObjectType | Select GroupID -Unique).GroupID)
     {
-        # New object group e.g. Script, Tennant, Device Configuration
+        # New object group e.g. Script, Tenant, Device Configuration
         # A group matches a menu item in the protal but can contain multiple object types
         if($global:cbDocumentationType.SelectedItem.NewObjectGroup)
         {
@@ -4507,7 +4559,11 @@ function local:Invoke-StartDocumentatiom
                                 break
                             }
                             
-                            if($global:chkSkipNotConfigured.IsChecked -and (($item.RawValue -isnot [array] -and ([String]::IsNullOrEmpty($item.RawValue) -or ("$($item.RawValue)" -eq "notConfigured"))) -or ($item.RawValue -is [array] -and ($item.RawValue | measure).Count -eq 0)))
+                            if($item.AlwaysAddValue -eq $true)
+                            {
+                                
+                            }
+                            elseif($global:chkSkipNotConfigured.IsChecked -and (($item.RawValue -isnot [array] -and ([String]::IsNullOrEmpty($item.RawValue) -or ("$($item.RawValue)" -eq "notConfigured"))) -or ($item.RawValue -is [array] -and ($item.RawValue | measure).Count -eq 0)))
                             {
                                 # Skip unconfigured items e.g. properties with null values
                                 # Note: This could removed configured properties if RawValue is not specified
@@ -4555,7 +4611,7 @@ function local:Invoke-StartDocumentatiom
                         }
     
                         $documentedObj | Add-Member Noteproperty -Name "FilteredSettings" -Value $filteredSettings -Force 
-                                              
+
                         & $global:cbDocumentationType.SelectedItem.Process $obj.Object $obj.ObjectType $documentedObj
                     }
                 }
@@ -5040,4 +5096,19 @@ function Set-TableObjects
     {
         $script:ObjectTypeFullTable.Add($objectInfo.ObjectType.Id, $objectInfo)
     }
+}
+
+function Get-PolicyTypeName
+{
+    param($type, $default = $null)
+
+    $categoryObj =  Get-TranslationFiles $type
+
+    if($null -eq $categoryObj) { return $default }
+
+    $lngStr = Get-LanguageString "PolicyType.$($categoryObj.PolicyTypeLanguageId)"
+
+    if($lngStr) { return $lngStr }
+
+    return $defult
 }

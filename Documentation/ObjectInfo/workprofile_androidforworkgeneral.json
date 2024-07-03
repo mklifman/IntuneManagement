@@ -1,4 +1,4 @@
-﻿{
+{
     "workprofile_androidforworkgeneral":  [
                                               {
                                                   "isSettingDescription":  false,
@@ -363,20 +363,6 @@
                                                   "dataType":  8,
                                                   "category":  127,
                                                   "nameResourceKey":  "workProfilePasswordSettingsHeader",
-                                                  "childSettings":  [
-
-                                                                    ],
-                                                  "options":  [
-
-                                                              ],
-                                                  "booleanActions":  0,
-                                                  "policyType":  13,
-                                                  "enabled":  true
-                                              },
-                                              {
-                                                  "dataType":  10,
-                                                  "category":  127,
-                                                  "nameResourceKey":  "androidTwelveDeprecationInfoBox",
                                                   "childSettings":  [
 
                                                                     ],

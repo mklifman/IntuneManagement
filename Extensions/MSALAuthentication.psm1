@@ -10,7 +10,7 @@ This module manages Authentication for the application with MSAL. It is also res
 #>
 function Get-ModuleVersion
 {
-    '3.9.2'
+    '3.9.7'
 }
 
 $global:msalAuthenticator = $null
@@ -770,7 +770,7 @@ function Get-MSALApp
         [void] $appBuilder.WithClientName("CloudAPIPowerShellManagement") 
         [void] $appBuilder.WithClientVersion($PSVersionTable.PSVersion)
 
-        Add-MSALProxy $appBuilder
+        Add-MSALProxy $appBuilder   
         
         # Ceck if correct version...
         #$appBuilder.WithMultiCloudSupport($true)        
@@ -1148,7 +1148,7 @@ function Connect-MSALUser
             #########################################################################################################
             try 
             {
-                Write-Log "Get tennant list"
+                Write-Log "Get tenant list"
                 
                 # Can we reuse the app used for login?
                 $appBuilder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::Create($global:appObj.ClientID)
@@ -1809,7 +1809,8 @@ function Get-MSALProfileEllipse
                     {
                         try
                         {
-                            $lbObj = [Windows.Markup.XamlReader]::Parse("<TextBlock $wpfNS  HorizontalAlignment=`"Stretch`"><Bold>$($tenant.DisplayName)</Bold><LineBreak/>$($tenant.defaultDomain)<LineBreak/>$($tenant.tenantId)</TextBlock>")
+                            $tenantName = [System.Web.HttpUtility]::HtmlEncode($tenant.DisplayName)
+                            $lbObj = [Windows.Markup.XamlReader]::Parse("<TextBlock $wpfNS  HorizontalAlignment=`"Stretch`"><Bold>$($tenantName)</Bold><LineBreak/>$($tenant.defaultDomain)<LineBreak/>$($tenant.tenantId)</TextBlock>")
 
                             if($tenant.tenantId -ne $global:MSALToken.TenantId)
                             {
@@ -1950,7 +1951,7 @@ function local:Add-CachedUser
         $icon.Margin = "0,0,5,0"
         $grdLogin.Children.Add($icon) | Out-Null
 
-        $tenantName = Get-Setting $account.HomeAccountId.TenantId "_Name" $account.HomeAccountId.TenantId
+        $tenantName = [System.Web.HttpUtility]::HtmlEncode((Get-Setting $account.HomeAccountId.TenantId "_Name" $account.HomeAccountId.TenantId))
 
         $lbObj = [Windows.Markup.XamlReader]::Parse("<TextBlock $wpfNS>$($account.UserName)<LineBreak/>$($tenantName)</TextBlock>")
         $lbObj.SetValue([System.Windows.Controls.Grid]::ColumnProperty,1)

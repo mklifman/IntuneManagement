@@ -14,6 +14,8 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
@@ -34,9 +36,9 @@
                     <Grid Grid.Column='1' Grid.Row='1' Margin="0,5,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />  
-                            <ColumnDefinition Width="5" />                              
-                            <ColumnDefinition Width="Auto" />                                
-                        </Grid.ColumnDefinitions>                 
+                            <ColumnDefinition Width="5" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>                
                         </Grid.RowDefinitions>
@@ -45,16 +47,28 @@
                     </Grid>
 
                     <StackPanel Orientation="Horizontal" Grid.Row='2' Margin="0,5,5,0" >
+                        <Label Content="Skip Basic Properties" />
+                        <Rectangle Style="{DynamicResource InfoIcon}" ToolTip="Skip basic properties like name, description, modified etc." />
+                    </StackPanel>
+                    <CheckBox Grid.Column='1' Grid.Row='2' Name='chkSkipCompareBasicProperties' VerticalAlignment="Center" />
+
+                    <StackPanel Orientation="Horizontal" Grid.Row='3' Margin="0,5,5,0" >
+                        <Label Content="Skip Assignments" />
+                        <Rectangle Style="{DynamicResource InfoIcon}" ToolTip="Skip comapring assignments." />
+                    </StackPanel>
+                    <CheckBox Grid.Column='1' Grid.Row='3' Name='chkSkipCompareAssignments' VerticalAlignment="Center" />
+
+                    <StackPanel Orientation="Horizontal" Grid.Row='5' Margin="0,5,5,0" >
                                     <Label Content="Comparison Type" />
                                     <Rectangle Style="{DynamicResource InfoIcon}" ToolTip="Specify how objects should be compared" />
                     </StackPanel>
-                    <ComboBox Name="cbCompareType" Margin="0,5,0,0" MinWidth="250" Grid.Row='2' Grid.Column="1" HorizontalAlignment="Left" 
+                    <ComboBox Name="cbCompareType" Margin="0,5,0,0" MinWidth="250" Grid.Row='5' Grid.Column="1" HorizontalAlignment="Left" 
                                 DisplayMemberPath="Name" SelectedValuePath="Value"  />
                                 
                     <TextBlock Grid.Row='999' TextWrapping="Wrap" Margin="5,20,5,0" Grid.ColumnSpan="2">
                     The <Bold>Property</Bold> comparison method is a quick and easy option for objects that are based on a static set of properties <LineBreak/>
-                    e.g. Configuration Profiles, Compliance Polcies etc.<LineBreak/>This method will compare each property of the objects. <LineBreak/>
-                    The downside of this method is that it could be difficult to match the property name with the setting in th UI.
+                    e.g. Configuration Profiles, Compliance Policies etc.<LineBreak/>This method will compare each property of the objects. <LineBreak/>
+                    The downside of this method is that it could be difficult to match the property name with the setting in the UI.
                     <LineBreak/>
                     The <Bold>Documentation</Bold> method will use the documentation engine and compare property values as they are displayed in the portal.<LineBreak/> 
                     This is recommended for objects with dynamic settings e.g. Settings Catalog and Endpoint security objects. <LineBreak/>

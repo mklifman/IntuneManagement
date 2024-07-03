@@ -10,7 +10,7 @@ This module is for the Endpoint Manager/Intune View. It manages Export/Import/Co
 #>
 function Get-ModuleVersion
 {
-    '3.9.2'
+    '3.9.7'
 }
 
 function Invoke-InitializeModule
@@ -89,6 +89,22 @@ function Invoke-InitializeModule
         SubPath = "EndpointManager"
     }) "EndpointManager"
 
+    Get-SettingValue "ProxyURI"
+
+    if($global:FirstTimeRunning) {
+        Save-Setting "EndpointManager" "EMAzureApp" $global:DefaultAzureApp
+    }
+
+    $currentAppID = Get-SettingValue "EMAzureApp"
+    $customAppID = Get-SettingValue "EMCustomAppId"
+    $global:informOldAzureApp = $false
+
+    if(($global:OldAzureApps -is [Array] -and $currentAppID -in $global:OldAzureApps) -or (-not $currentAppID -and -not $customAppID))
+    {
+        $global:informOldAzureApp = $true
+        Write-Log "Microsoft Intune PowerShell is being decomissioned. Please change to a supported app eg Microsoft Graph or a custom app!" 2            
+    }
+
     $viewPanel = Get-XamlObject ($global:AppRootFolder + "\Xaml\EndpointManagerPanel.xaml") -AddVariables
     
     Set-EMViewPanel $viewPanel
@@ -105,7 +121,7 @@ function Invoke-InitializeModule
         Activating = { Invoke-EMActivatingView  }
         Authentication = (Get-MSALAuthenticationObject)
         Authenticate = { Invoke-EMAuthenticateToMSAL @args }
-        AppInfo = (Get-GraphAppInfo "EMAzureApp" "d1ddf0e4-d672-4dae-b554-9d5bdfd93547" "EM")
+        AppInfo = (Get-GraphAppInfo "EMAzureApp" $global:DefaultAzureApp "EM")
         SaveSettings = { Invoke-EMSaveSettings }
 
         Permissions = @()
@@ -200,6 +216,21 @@ function Invoke-InitializeModule
         GroupId = "CompliancePolicies"
     })
 
+    Add-ViewItem (New-Object PSObject -Property @{
+        Title = "Compliance Policies - V2"
+        Id = "CompliancePoliciesV2"
+        ViewID = "IntuneGraphAPI"
+        API = "/deviceManagement/compliancePolicies"
+        NameProperty = "Name"
+        PropertiesToRemove = @('settingCount')
+        ViewProperties = @("name","description","Id")
+        Expand="settings"
+        Permissons=@("DeviceManagementConfiguration.ReadWrite.All")
+        GroupId = "CompliancePolicies"
+        Icon = "CompliancePolicies"
+    })
+
+    
     Add-ViewItem (New-Object PSObject -Property @{
         Title = "Compliance Scripts"
         Id = "ComplianceScripts"
@@ -375,6 +406,8 @@ function Invoke-InitializeModule
         Icon="CustomAttributes"
         GroupId = "CustomAttributes" # MacOS Settings
         DetailExtension = { Add-ScriptExtensions @args }
+        ExportExtension = { Add-ScriptExportExtensions @args }
+        PostExportCommand = { Start-PostExportScripts @args }
         PropertiesToRemoveForUpdate = @('customAttributeName','customAttributeType','displayName')
         #PreUpdateCommand = { Start-PreUpdateMacCustomAttributes @args }
     })    
@@ -703,6 +736,7 @@ function Invoke-InitializeModule
         ExpandAssignmentsList = $false
         PreFilesImportCommand = { Start-PreFilesImportADMXFiles @args }
         PreImportCommand = { Start-PreImportADMXFiles @args }
+        PostImportCommand = { Start-PostImportADMXFiles @args }
         PreDeleteCommand = { Start-PreDeleteADMXFiles @args }
         ViewProperties = @("fileName","status","Id")
         PropertiesToRemove = @("languageCodes","targetPrefix","targetNamespace","policyType","revision","status","uploadDateTime")
@@ -801,7 +835,7 @@ function Invoke-EMAuthenticateToMSAL
 {
     param($params = @{})
 
-    $global:EMViewObject.AppInfo = Get-GraphAppInfo "EMAzureApp" "d1ddf0e4-d672-4dae-b554-9d5bdfd93547" "EM"
+    $global:EMViewObject.AppInfo = Get-GraphAppInfo "EMAzureApp" $global:DefaultAzureApp "EM"
     Set-MSALCurrentApp $global:EMViewObject.AppInfo
     & $global:msalAuthenticator.Login -Account (?? $global:MSALToken.Account.UserName (Get-Setting "" "LastLoggedOnUser")) @params
 }
@@ -817,7 +851,7 @@ function Invoke-EMActivatingView
     Show-MSALError
     
     # Refresh values in case they have changed
-    $global:EMViewObject.AppInfo = (Get-GraphAppInfo "EMAzureApp" "d1ddf0e4-d672-4dae-b554-9d5bdfd93547" "EM")
+    $global:EMViewObject.AppInfo = (Get-GraphAppInfo "EMAzureApp" $global:DefaultAzureApp "EM")
     if(-not $global:EMViewObject.Authentication)
     {
         $global:EMViewObject.Authentication = Get-MSALAuthenticationObject    
@@ -829,7 +863,7 @@ function Invoke-EMActivatingView
 
 function Invoke-EMSaveSettings
 {
-    $tmpApp = Get-GraphAppInfo "EMAzureApp" "d1ddf0e4-d672-4dae-b554-9d5bdfd93547"
+    $tmpApp = Get-GraphAppInfo "EMAzureApp" $global:DefaultAzureApp
 
     if($global:appObj.ClientID -ne $tmpApp.ClientId -and $global:MSALToken)
     {
@@ -848,6 +882,8 @@ function Invoke-EMSaveSettings
 function Invoke-GraphAuthenticationUpdated
 {
     Set-EMUIStatus
+
+    $script:CustomADMXDefinitions = $null
 }
 
 function Set-EMUIStatus
@@ -1128,7 +1164,7 @@ function Start-PostExportEndpointSecurity
 {
     param($obj, $objectType, $path)
 
-    $fileName = (Get-GraphObjectName $obj $objectType)
+    $fileName = (Get-GraphObjectName $obj $objectType).Trim('.')
     if((Get-SettingValue "AddIDToExportFile") -eq $true -and $obj.Id)
     {
         $fileName = ($fileName + "_" + $obj.Id)
@@ -1329,7 +1365,7 @@ function Start-PostExportCompliancePolicies
             foreach($notificationMessageCCGroup in $scheduledActionConfiguration.notificationMessageCCList)
             {
                 Add-GroupMigrationObject $notificationMessageCCGroup
-            }            
+            }
         }
     }
 }
@@ -2008,6 +2044,10 @@ function local:Start-ImportApp
     {
         $fileEncryptionInfo = Copy-MSILOB $packageFile $obj
     }
+    elseif($appType -eq "microsoft.graph.windowsUniversalAppX")
+    {
+        $fileEncryptionInfo = Copy-MSIXLOB $packageFile $obj
+    }    
     elseif($appType -eq "microsoft.graph.iosLOBApp")
     {
         $fileEncryptionInfo = Copy-iOSLOB $packageFile $obj
@@ -2023,10 +2063,9 @@ function local:Start-ImportApp
 
     if((Get-SettingValue "EMSaveEncryptionFile") -eq $true)
     {
-        #$fileEncryptionInfo = $fileEncryptionInfo | where { $null -ne $_.fileEncryptionInfo }
         if($fileEncryptionInfo)
         {
-            $jsonEncryptionInfo = $fileEncryptionInfo.fileEncryptionInfo | ConvertTo-Json -Depth 10
+            $jsonEncryptionInfo = $fileEncryptionInfo | ConvertTo-Json -Depth 10
             
             $pkgPath = Get-SettingValue "EMIntuneAppDownloadFolder" (Get-SettingValue "EMIntuneAppPackages")
             if($pkgPath -and [IO.Directory]::Exists($pkgPath))
@@ -2142,13 +2181,16 @@ function Add-DetailExtensionApplications
         $dlgSave = [System.Windows.Forms.SaveFileDialog]::new()
         $dlgSave.InitialDirectory = $pkgPath
         $dlgSave.FileName = ($obj.FileName + ".encrypted")
+        $dlgSave.DefaultExt = "*.encrypted"
+        $dlgSave.Filter = "Encrypted intunewin (*.encrypted)|*.encrypted|All files (*.*)|*.*"
+
         if($dlgSave.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK -and $dlgSave.Filename)
         {
-            Start-DownloadAppContent $obj $dlgSave.FileName
+            $contentFileObj = Start-DownloadAppContent $obj $dlgSave.FileName
 
             if([IO.File]::Exists($dlgSave.FileName))
             {
-                $fullPath = $pkgPath + "\$($obj.displayName)_$($obj.id)_$($obj.committedContentVersion).json"
+                $fullPath = Find-AppEncryptionFile $obj $contentFileObj $pkgPath
                 if([IO.File]::Exists($fullPath) -eq $false)
                 {
                     if(([System.Windows.MessageBox]::Show("Could not find decryption file for $($obj.displayName)`nApp Id: $($obj.id)`nContent version $($obj.committedContentVersion)`n`nDo you want to browse for the file?", "Encryption file not found", "YesNo", "Warning")) -eq "Yes")
@@ -2156,7 +2198,7 @@ function Add-DetailExtensionApplications
                         $of = [System.Windows.Forms.OpenFileDialog]::new()
                         $of.InitialDirectory = $pkgPath
                         $of.DefaultExt = "*.json"
-                        $of.Filter = "Json (*.json)|*.*"
+                        $of.Filter = "Json (*.json)|*.json"
                         $of.Multiselect = $false
                         
                         if($of.ShowDialog() -eq "OK")
@@ -2170,8 +2212,16 @@ function Add-DetailExtensionApplications
                 {
                     Write-Status "Decrypting file"
                     $encryptionInfo = ConvertFrom-Json (Get-Content -Path $fullPath -Raw)
+                    if($encryptionInfo.fileEncryptionInfo)
+                    {
+                        $encryptionInfo = $encryptionInfo.fileEncryptionInfo
+                    }
                     $destination = $pkgPath + "\$($obj.FileName)"
                     Start-DecryptFile $dlgSave.Filename $destination $encryptionInfo.encryptionKey $encryptionInfo.initializationVector
+                    try { [IO.File]::Delete($dlgSave.Filename) }
+                    catch {
+                        Write-LogError "Failed to delete exported encrypted file" $_.Exception
+                    }                
                 }
                 else
                 {
@@ -2188,7 +2238,28 @@ function Add-DetailExtensionApplications
     { 
         $tmp.Children.Insert($index, $btnDownload)
     }    
+}
 
+function Find-AppEncryptionFile
+{
+    param($obj, $contentFileObj, $rootFolders)
+
+    $search = @()
+    $search += "$($obj.displayName)_$($obj.id)_$($obj.committedContentVersion)"
+    $search += "$([IO.Path]::GetFileNameWithoutExtension($obj.fileName))_$($contentFileObj.size)"
+    $search += "$($obj.displayName)_$($contentFileObj.size)"
+
+    foreach($rootFolder in $rootFolders)
+    {
+        foreach($searchName in $search)
+        {
+            $fullName = ($rootFolder + "\$($searchName).json")
+            if([IO.File]::Exists($fullName))
+            {
+                return $fullName
+            }
+        }
+    }
 }
 
 function Start-PreImportAssignmentsApplications
@@ -2278,7 +2349,7 @@ function Start-PostExportApplications
     Save-Setting "Intune" "ExportAppFile" $global:chkExportApplicationFile.IsChecked
     if($global:chkExportApplicationFile.IsChecked)
     {
-        $encryptioSource = Get-SettingValue "EMIntuneAppDownloadFolder" (Get-SettingValue "EMIntuneAppPackages")
+        $encryptionSource = Get-SettingValue "EMIntuneAppDownloadFolder" (Get-SettingValue "EMIntuneAppPackages")
         $pkgPath = $path 
 
         if($pkgPath)
@@ -2286,27 +2357,32 @@ function Start-PostExportApplications
             Write-Status "Download file"
 
             $exportFile = $pkgPath + "\$($obj.FileName).encrypted"
-            $encryptionFile = $encryptioSource + "\$($obj.displayName)_$($obj.id)_$($obj.committedContentVersion).json"
+            $contentFileObj = Start-DownloadAppContent $obj $exportFile -GetContentFileInfoOnly
+            $encryptionFile = Find-AppEncryptionFile $obj $contentFileObj $encryptionSource            
             if($encryptionFile -and [IO.File]::Exists($encryptionFile))
             {
-                Start-DownloadAppContent $obj $exportFile
+                Start-DownloadFile $contentFileObj.azureStorageUri $exportFile
 
                 if([IO.File]::Exists($exportFile))
                 {
                     Write-Status "Decrypting file"
                     $encryptionInfo = ConvertFrom-Json (Get-Content -Path $encryptionFile -Raw)
+                    if($encryptionInfo.fileEncryptionInfo)
+                    {
+                        $encryptionInfo = $encryptionInfo.fileEncryptionInfo
+                    }                    
                     $destination = $pkgPath + "\$($obj.FileName)"
                     Start-DecryptFile $exportFile $destination $encryptionInfo.encryptionKey $encryptionInfo.initializationVector
                 }
 
                 try { [IO.File]::Delete($exportFile) }
                 catch {
-                    Write-LogError "Filed to delete exported encrypted file" $_.Exception
+                    Write-LogError "Failed to delete exported encrypted file" $_.Exception
                 }
             }
             else
             {
-                Write-Log "Cound not file encryption file `"$($obj.displayName)_$($obj.id)_$($obj.committedContentVersion).json`""
+                Write-Log "Cound not file encryption file"
             }
         }
     }
@@ -2537,7 +2613,7 @@ function Get-GPOObjectSettings
                 "definition@odata.bind" = "$($global:graphURL)/deviceManagement/groupPolicyDefinitions('$($definitionValue.definition.id)')"
                 }
 
-        if($GPOObj.policyConfigurationIngestionType -eq "Custom")
+        if($definitionValue.definition.categoryPath)
         {
             $obj.Add("#Definition_Id", $definitionValue.definition.id)
             $obj.Add("#Definition_displayName", $definitionValue.definition.displayName)
@@ -2555,7 +2631,7 @@ function Get-GPOObjectSettings
                 # Add presentation@odata.bind property that links the value to the presentation object
                 $presentationValue | Add-Member -MemberType NoteProperty -Name "presentation@odata.bind" -Value "$($global:graphURL)/deviceManagement/groupPolicyDefinitions('$($definitionValue.definition.id)')/presentations('$($presentationValue.presentation.id)')"
 
-                if($GPOObj.policyConfigurationIngestionType -eq "Custom")
+                if($definitionValue.definition.categoryPath)
                 {
                     $presentationValue | Add-Member -MemberType NoteProperty -Name "#Presentation_Id" -Value $presentationValue.presentation.id
                     $presentationValue | Add-Member -MemberType NoteProperty -Name "#Presentation_Label" -Value $presentationValue.presentation.label
@@ -2579,15 +2655,15 @@ function Get-GPOObjectSettings
 
 function Import-GPOSetting
 {
-    param($obj, $settings, [switch]$CustomADMX)
+    param($obj, $settings)
     
     if($obj)
     {
         Write-Status "Import settings for $($obj.displayName)"
 
-        $isCustomADMX = $CustomADMX -eq $true
+        $hasCustomADMX = $null -ne ($settings | Where { $null -ne $_.'#Definition_categoryPath' })
 
-        if($isCustomADMX)
+        if($hasCustomADMX)
         {
             Write-Status "Import custom ADMX settings"
             if(-not $script:CustomADMXDefinitions)
@@ -2606,7 +2682,12 @@ function Import-GPOSetting
                                 Category = $tmpCat
                                 Presentations = $null
                             }
-                            $script:CustomADMXDefinitions.Add($key, $val)
+                            try {
+                                $script:CustomADMXDefinitions.Add($key, $val)                                
+                            }
+                            catch {
+                                Write-Log "Failed to add '$($tmpDef.displayName)' in category '$($tmpDef.categoryPath)' of class $($tmpDef.classType)" 3
+                            }
                         }
                     }
                 }
@@ -2615,7 +2696,7 @@ function Import-GPOSetting
         
         foreach($setting in $settings)
         {
-            if($isCustomADMX -and $script:CustomADMXDefinitions -is [HashTable] -and $script:CustomADMXDefinitions.Count -gt 0)
+            if($setting.'#Definition_categoryPath' -and $script:CustomADMXDefinitions -is [HashTable] -and $script:CustomADMXDefinitions.Count -gt 0)
             {
                 $defVal = $null
                 $key = ($setting.'#Definition_displayName' + $setting.'#Definition_categoryPath' + $setting.'#Definition_classType').ToLower()
@@ -2670,7 +2751,7 @@ function Import-GPOSetting
                     Write-Log "Settings might not be available if imported in another environment" 3
                 }
             }
-            elseif($isCustomADMX)
+            elseif($setting.'#Definition_categoryPath')
             {
                 Write-Log "Custom AMDX settings cannot be imported without ADMX file imported. Definitions not found" 2
                 continue
@@ -2678,7 +2759,7 @@ function Import-GPOSetting
 
             Start-GraphPreImport $setting
 
-            if($true) #$isCustomADMX)
+            if($true) 
             {
                 foreach($tmpProp in (($setting.PSObject.Properties | Where Name -like "#*").Name))
                 {
@@ -2704,7 +2785,7 @@ function Start-PostExportAdministrativeTemplate
 {
     param($obj, $objectType, $path)
 
-    $fileName = (Get-GraphObjectName $obj $objectType)
+    $fileName = (Get-GraphObjectName $obj $objectType).Trim('.')
     if((Get-SettingValue "AddIDToExportFile") -eq $true -and $obj.Id)
     {
         $fileName = ($fileName + "_" + $obj.Id)
@@ -2743,7 +2824,7 @@ function Start-PostFileImportAdministrativeTemplate
     {
         $tmpObj = Get-GraphObjectFromFile $file
 
-        Import-GPOSetting $obj $settings -CustomADMX:($tmpObj.policyConfigurationIngestionType -eq "Custom")
+        Import-GPOSetting $obj $settings
     }    
 }
 
@@ -2968,7 +3049,7 @@ function Start-PostExportRoleDefinitions
 {
     param($obj, $objectType, $path)
 
-    $fileName = (Get-GraphObjectName $obj $objectType)
+    $fileName = (Get-GraphObjectName $obj $objectType).Trim('.')
     if((Get-SettingValue "AddIDToExportFile") -eq $true -and $obj.Id)
     {
         $fileName = ($fileName + "_" + $obj.Id)
@@ -3468,7 +3549,9 @@ function Add-EMAssignmentsToExportFile
 {
     param($obj, $objectType, $path, $Url = "")
 
-    $fileName = (Get-GraphObjectName $obj $objectType)
+    if($global:chkExportAssignments.IsChecked -ne $true) { return }
+
+    $fileName = (Get-GraphObjectName $obj $objectType).Trim('.')
     if((Get-SettingValue "AddIDToExportFile") -eq $true -and $obj.Id)
     {
         $fileName = ($fileName + "_" + $obj.Id)
@@ -3809,6 +3892,13 @@ function Start-PreImportADMXFiles
         languageCode = (?? $obj.defaultLanguageCode "en-US")
     }
     $obj.defaultLanguageCode = ""
+}
+
+function Start-PostImportADMXFiles
+{
+    param($obj, $objectType, $file)
+
+    $script:CustomADMXDefinitions = $null
 }
 
 function Start-PreDeleteADMXFiles

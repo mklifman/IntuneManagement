@@ -1,11 +1,11 @@
-﻿{
+{
     "kiosk_androidgeneral":  [
                                  {
                                      "isSettingDescription":  true,
                                      "showAsSectionHeader":  false,
                                      "dataType":  8,
                                      "category":  72,
-                                     "nameResourceKey":  "androidGeneralKiosk",
+                                     "nameResourceKey":  "androidRestrictedKiosk",
                                      "childSettings":  [
 
                                                        ],

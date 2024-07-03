@@ -10,7 +10,7 @@ This module will also document some objects based on PowerShell functions
 
 function Get-ModuleVersion
 {
-    '1.6.2'
+    '1.6.5'
 }
 
 function Invoke-InitializeModule
@@ -35,6 +35,7 @@ function Initialize-CDDocumentation
 {
     $script:allTenantApps = $null
     $script:allTermsOfUse = $null 
+    $script:allAuthenticationStrength = $null
     $script:allAuthenticationContextClasses = $null 
     $script:allCustomCompliancePolicies = $null 
 }
@@ -75,9 +76,18 @@ function Invoke-CDDocumentObject
             Properties = @("Name","Value") 
         }
     }
-    elseif($type -eq '#microsoft.graph.iosMobileAppConfiguration')
+    elseif($type -eq '#microsoft.graph.androidManagedStoreAppConfiguration') {
+
+        Invoke-CDDocumentAndroidManagedStoreAppConfiguration $documentationObj
+        
+        return [PSCustomObject]@{
+            Properties = @("Name","Value","Category","SubCategory")
+        }
+    }
+    elseif($type -eq '#microsoft.graph.androidForWorkMobileAppConfiguration' -or
+            $type -eq '#microsoft.graph.iosMobileAppConfiguration')
     {
-        Invoke-CDDocumentiosMobileAppConfiguration $documentationObj
+        Invoke-CDDocumentMobileAppConfiguration $documentationObj
         return [PSCustomObject]@{
             Properties = @("Name","Value","Category","SubCategory")
         }
@@ -760,9 +770,10 @@ function Add-CDDocumentCustomProfileProperty
     }
     elseif($obj.'@OData.Type' -eq "#microsoft.graph.androidManagedAppProtection")
     {
-        $obj | Add-Member Noteproperty -Name "overrideFingerprint" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null)
-        $obj | Add-Member Noteproperty -Name "pinReset" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null)
+        $obj | Add-Member Noteproperty -Name "overrideFingerprint" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null -and $obj.pinRequiredInsteadOfBiometricTimeout -ne "PT0S")
+        $obj | Add-Member Noteproperty -Name "pinReset" -Value ($obj.periodBeforePinReset -ne $null -and $obj.periodBeforePinReset -ne "PT0S")
         $obj | Add-Member Noteproperty -Name "managedBrowserSelection" -Value (?: $obj.customBrowserPackageId  "unmanagedBrowser" $obj.managedBrowser)
+        $obj | Add-Member Noteproperty -Name "encryptOrgData" -Value ($obj.appDataEncryptionType -ne "useDeviceSettings")
         
         $retValue = $true
     }
@@ -785,10 +796,11 @@ function Add-CDDocumentCustomProfileProperty
 
         $obj | Add-Member Noteproperty -Name "sendDataSelector" -Value $sendDataOption
 
-        $obj | Add-Member Noteproperty -Name "overrideFingerprint" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null)
-        $obj | Add-Member Noteproperty -Name "pinReset" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null)
+        $obj | Add-Member Noteproperty -Name "overrideFingerprint" -Value ($obj.pinRequiredInsteadOfBiometricTimeout -ne $null -and $obj.pinRequiredInsteadOfBiometricTimeout -ne "PT0S")
+        $obj | Add-Member Noteproperty -Name "pinReset" -Value ($obj.periodBeforePinReset -ne $null -and $obj.periodBeforePinReset -ne "PT0S")
         $obj | Add-Member Noteproperty -Name "managedBrowserSelection" -Value (?: $obj.customBrowserPackageId  "unmanagedBrowser" $obj.managedBrowser)
-
+        $obj | Add-Member Noteproperty -Name "encryptOrgData" -Value ($obj.appDataEncryptionType -ne "useDeviceSettings")
+        
         $retValue = $true
     }
     elseif($obj.'@OData.Type' -eq "#microsoft.graph.windowsUpdateForBusinessConfiguration")
@@ -1328,9 +1340,16 @@ function Add-CDDocumentCustomProfileProperty
     {
         if($obj.ScriptContent)
         {
-            Add-ObjectScript $obj.FileName ("{1} - {0}" -f $obj.displayName,(Get-LanguageString "WindowsManagement.shellScriptObjectName")) $rule.ScriptContent
+            Add-ObjectScript $obj.FileName ("{1} - {0}" -f $obj.displayName,(Get-LanguageString "WindowsManagement.shellScriptObjectName")) $obj.ScriptContent
         }
     }
+    elseif($obj.'@OData.Type' -eq "#microsoft.graph.deviceCustomAttributeShellScript")
+    {
+        if($obj.ScriptContent)
+        {
+            Add-ObjectScript $obj.FileName ("{1} - {0}" -f $obj.displayName,(Get-LanguageString "WindowsManagement.customAttributeObjectName")) $obj.ScriptContent
+        }
+    }    
     elseif($obj.'@OData.Type' -eq "#microsoft.graph.windows10TeamGeneralConfiguration")
     {
         $obj | Add-Member Noteproperty -Name "syntheticAzureOperationalInsightsEnabled" -Value ($obj.azureOperationalInsightsBlockTelemetry -eq $false)
@@ -1820,7 +1839,105 @@ function Get-CDDocumentOperatorString
 }
 
 # App Config
-function Invoke-CDDocumentiosMobileAppConfiguration
+function Invoke-CDDocumentAndroidManagedStoreAppConfiguration
+{
+    param($documentationObj)
+
+    $obj = $documentationObj.Object
+    $objectType = $documentationObj.ObjectType
+
+    $script:objectSeparator = ?? $global:cbDocumentationObjectSeparator.SelectedValue ([System.Environment]::NewLine)
+    $script:propertySeparator = ?? $global:cbDocumentationPropertySeparator.SelectedValue ","
+    
+    ###################################################
+    # Basic info
+    ###################################################
+
+    Add-BasicDefaultValues $obj $objectType
+    Add-BasicAdditionalValues $obj $objectType
+    #Add-BasicPropertyValue (Get-LanguageString "TableHeaders.configurationType") (Get-LanguageString "SettingDetails.appConfiguration")
+    #Add-BasicPropertyValue (Get-LanguageString "Inputs.enrollmentTypeLabel") (Get-LanguageString "EnrollmentType.devicesWithEnrollment")
+
+    $allApps = Get-CDAllTenantApps
+    $appsList = @()
+
+    foreach($id in ($obj.targetedMobileApps))
+    {
+        $tmpApp = $allApps | Where Id -eq $id
+        $appsList += ?? $tmpApp.displayName $id
+    }
+
+    Add-BasicPropertyValue (Get-LanguageString "SettingDetails.targetedAppLabel") ($appsList -join $objSeparator)
+    
+    $category = Get-LanguageString "TableHeaders.settings"
+
+    if($obj.payloadJson)
+    {
+        $payloadData = $null
+        try
+        {
+            $payloadData = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($obj.payloadJson)) | ConvertFrom-Json
+        }
+        catch
+        {
+            Write-LogError "Failed to get Json payload" $_.Exception
+            return
+        }
+
+        # Not the best way. BundleId should be used but then full app info is required
+        if($obj.packageId -eq "com.microsoft.office.outlook*")
+        {
+            if([IO.File]::Exists(($global:AppRootFolder + "\Documentation\ObjectInfo\#AppConfigOutlookDevice.json")))
+            {
+                $tmp = $obj.settings | Where { $_.appConfigKey -eq "com.microsoft.outlook.EmailProfile.AccountType" }
+                if($tmp){ $configEmail=$true }else{ $configEmail=$false }
+                $outlookSettings = [PSCustomObject]@{
+                    configureEmail = $configEmail
+                }
+                foreach($setting in $obj.settings)
+                {
+                    if($setting.appConfigKeyType -eq "booleanType")
+                    {
+                        $value = $setting.appConfigKeyValue -eq "true"
+                    }
+                    else
+                    {
+                        $value = $setting.appConfigKeyValue
+                    }
+                    $outlookSettings | Add-Member Noteproperty -Name $setting.appConfigKey -Value $value -Force
+                }
+
+                $jsonObj = Get-Content ($global:AppRootFolder + "\Documentation\ObjectInfo\#AppConfigOutlookDevice.json") | ConvertFrom-Json
+                Invoke-TranslateSection $outlookSettings $jsonObj
+            }
+        }                
+        
+        $addedSettings = Get-DocumentedSettings
+
+        foreach($managedProperty in $payloadData.managedProperty)
+        {
+            if(($addedSettings | Where EntityKey -eq $managedProperty.key)) { continue }
+
+            $valueProperty = $managedProperty.PSObject.Properties | Where-Object Name -like "value*"
+
+            $value = $valueProperty.value
+
+            if($value -is [Array]) {
+                $value = $value -join ","
+            }
+
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $managedProperty.key
+                Value = $value
+                EntityKey = $managedProperty.key
+                Category = Get-LanguageString "TACSettings.generalSettings"
+                SubCategory = Get-LanguageString "SettingDetails.additionalConfiguration"
+            })
+        }
+    }
+}
+
+function Invoke-CDDocumentMobileAppConfiguration
 {
     param($documentationObj)
 
@@ -1886,7 +2003,7 @@ function Invoke-CDDocumentiosMobileAppConfiguration
     else 
     {
         # Not the best way. BundleId should be used but then full app info is required
-        if(($obj.settings | Where { $_.appConfigKey -like "com.microsoft.outlook*" }))
+        if(($obj.packageId | Where { $_.appConfigKey -like "com.microsoft.outlook*" }))
         {
             if([IO.File]::Exists(($global:AppRootFolder + "\Documentation\ObjectInfo\#AppConfigOutlookDevice.json")))
             {
@@ -2241,96 +2358,272 @@ function Invoke-CDDocumentConditionalAccess
 
     Add-BasicAdditionalValues $obj $objectType
 
-    ###################################################
-    # User and groups
-    ###################################################
-
-    $ids = @()
-    foreach($id in ($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups + $obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups))
-    {
-        if($id -in $ids) { continue }
-        elseif($id -eq "GuestsOrExternalUsers") { continue }
-        elseif($id -eq "All") { continue }
-        elseif($id -eq "None") { continue }
-        
-        $ids += $id
-    }    
-
-    $roleIds = @()
-    foreach($id in ($obj.conditions.users.includeRoles + $obj.conditions.users.excludeRoles))
-    {
-        if($id -in $ids) { continue }
-        $roleIds += $id
-    }
-    
-    $idInfo = $null
-
-    if($ids.Count -gt 0)
-    {
-        $ht = @{}
-        $ht.Add("ids", @($ids | Unique))
-
-        $body = $ht | ConvertTo-Json
-
-        # ToDo: Get from MigFile for Offline
-        $idInfo = (Invoke-GraphRequest -Url "/directoryObjects/getByIds?`$select=displayName,id" -Content $body -Method "Post").Value
-    }
-
-    if($roleIds.Count -gt 0 -and -not $script:allAadRoles)
-    {
-        $script:allAadRoles =(Invoke-GraphRequest -url "/directoryRoleTemplates?`$select=Id,displayName" -ODataMetadata "minimal").value
-    }
-
     $includeLabel = Get-LanguageString "AzureCA.userSelectionBladeIncludeTabTitle"
     $excludeLabel = Get-LanguageString "AzureCA.userSelectionBladeExcludeTabTitle"
 
-    $category = Get-LanguageString "AzureCA.usersGroupsLabel"
+    if($obj.conditions.clientApplications.includeServicePrincipals -or $obj.conditions.clientApplications.excludeServicePrincipals)
+    {
+        ###################################################
+        # Workload
+        ###################################################
 
-    if((($obj.conditions.users.includeUsers | Where { $_ -eq "All"}) -ne $null))
-    {
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = $includeLabel
-            Value = Get-LanguageString "AzureCA.allUsersString"
-            Category = $category
-            SubCategory = $includeLabel
-            EntityKey = "includeUsers"
-        })        
-    }
-    elseif((($obj.conditions.users.includeUsers | Where { $_ -eq "None"}) -ne $null))
-    {
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = $includeLabel
-            Value = Get-LanguageString "AzureCA.chooseApplicationsNone"
-            Category = $category
-            SubCategory = $includeLabel
-            EntityKey = "includeUsers"
-        })        
+        $ids = @()
+        foreach($id in ($obj.conditions.clientApplications.includeServicePrincipals + $obj.conditions.clientApplications.excludeServicePrincipals))
+        {
+            if($id -in $ids) { continue }
+            elseif($id -eq "ServicePrincipalsInMyTenant") { continue }
+            
+            $ids += $id
+        }
+
+        $category = Get-LanguageString "AzureCA.workloadIdentities"
+
+        $idInfo = $null
+
+        if($ids.Count -gt 0)
+        {
+            $ht = @{}
+            $ht.Add("ids", @($ids | Unique))
+
+            $body = $ht | ConvertTo-Json
+
+            # ToDo: Get from MigFile for Offline
+            $idInfo = (Invoke-GraphRequest -Url "/directoryObjects/getByIds?`$select=displayName,id" -Content $body -Method "Post").Value
+        }
+        
+        if((($obj.conditions.clientApplications.includeServicePrincipals | Where { $_ -eq "ServicePrincipalsInMyTenant"}) -ne $null))
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.servicePrincipalRadioAll"
+                Category = $category
+                SubCategory = $includeLabel
+                EntityKey = "includeServicePrincipals"
+            })        
+        }
+        elseif((($obj.conditions.clientApplications.includeServicePrincipals | Where { $_ -eq "None"}) -ne $null))
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.chooseApplicationsNone"
+                Category = $category
+                SubCategory = $includeLabel
+                EntityKey = "includeServicePrincipals"
+            })        
+        }
+        elseif($ids.Count -gt 0 -and $obj.conditions.clientApplications.includeServicePrincipals)
+        {
+            #$category = Get-LanguageString "AzureCA.selectedSP"
+            $tmpObjs = @() 
+            foreach($id in ($obj.conditions.clientApplications.includeServicePrincipals))
+            {
+                $idObj = $idInfo | Where Id -eq $id
+                $tmpObjs += ?? $idObj.displayName $id
+            }
+            
+            if($tmpObjs.count -gt 0)
+            {
+                Add-CustomSettingObject ([PSCustomObject]@{
+                    Name = $category
+                    Value = $tmpObjs -join $script:objectSeparator
+                    Category = $category
+                    SubCategory = $includeLabel
+                    EntityKey = "includeServicePrincipals"
+                })
+            }
+        } 
+
+        if($obj.conditions.clientApplications.servicePrincipalFilter)
+        {
+            if($obj.conditions.clientApplications.servicePrincipalFilter.mode -eq "include") 
+            {
+                $filterMode = "included"
+            }
+            else
+            {
+                $filterMode = "excluded"
+            }
+    
+            #AzureCA.PolicyBlade.Conditions.DeviceAttributes.AssignmentFilter.Blade
+            #AzureCA.PolicyBlade.Conditions.DeviceAttributes.Blade.title
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = Get-LanguageString "AzureCA.PolicyBlade.Conditions.DeviceAttributes.Blade.AppliesTo.$filterMode"
+                Value = $obj.conditions.clientApplications.servicePrincipalFilter.rule
+                Category = $category
+                SubCategory = Get-LanguageString "AzureCA.PolicyBlade.Conditions.DeviceAttributes.Blade.title"
+                EntityKey = "excludeServicePrincipalDevices"
+            })           
+        }         
+
+        if((($obj.conditions.clientApplications.excludeServicePrincipals | Where { $_ -eq "ServicePrincipalsInMyTenant"}) -ne $null))
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.servicePrincipalRadioAll"
+                Category = $category
+                SubCategory = $excludeLabel
+                EntityKey = "excludeServicePrincipals"
+            })        
+        }
+        elseif($ids.Count -gt 0)
+        {
+            #$category = Get-LanguageString "AzureCA.selectedSP"
+            $tmpObjs = @() 
+            foreach($id in ($obj.conditions.clientApplications.excludeServicePrincipals))
+            {
+                $idObj = $idInfo | Where Id -eq $id
+                $tmpObjs += ?? $idObj.displayName $id
+            }
+
+            if($tmpObjs.count -gt 0)
+            {
+                Add-CustomSettingObject ([PSCustomObject]@{
+                    Name = $category
+                    Value = $tmpObjs -join $script:objectSeparator
+                    Category = $category
+                    SubCategory = $excludeLabel
+                    EntityKey = "excludeServicePrincipals"
+                })
+            }
+        }
     }
     else
     {
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = $includeLabel
-            Value = Get-LanguageString "AzureCA.userSelectionBladeSelectedUsers"
-            Category = $category
-            SubCategory = $includeLabel
-            EntityKey = "includeUsers"
-        })  
+        ###################################################
+        # User and groups
+        ###################################################
 
-        if((($obj.conditions.users.includeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null))
+        $ids = @()
+        foreach($id in ($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups + $obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups))
+        {
+            if($id -in $ids) { continue }
+            elseif($id -eq "GuestsOrExternalUsers") { continue }
+            elseif($id -eq "All") { continue }
+            elseif($id -eq "None") { continue }
+            
+            $ids += $id
+        }
+
+        $roleIds = @()
+        foreach($id in ($obj.conditions.users.includeRoles + $obj.conditions.users.excludeRoles))
+        {
+            if($id -in $ids) { continue }
+            $roleIds += $id
+        }
+        
+        $idInfo = $null
+
+        if($ids.Count -gt 0)
+        {
+            $ht = @{}
+            $ht.Add("ids", @($ids | Unique))
+
+            $body = $ht | ConvertTo-Json
+
+            # ToDo: Get from MigFile for Offline
+            $idInfo = (Invoke-GraphRequest -Url "/directoryObjects/getByIds?`$select=displayName,id" -Content $body -Method "Post").Value
+        }
+
+        if($roleIds.Count -gt 0 -and -not $script:allAadRoles)
+        {
+            $script:allAadRoles =(Invoke-GraphRequest -url "/directoryRoleTemplates?`$select=Id,displayName" -ODataMetadata "minimal").value
+        }
+
+        $category = Get-LanguageString "AzureCA.usersGroupsLabel"
+
+        if((($obj.conditions.users.includeUsers | Where { $_ -eq "All"}) -ne $null))
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.allUsersString"
+                Category = $category
+                SubCategory = $includeLabel
+                EntityKey = "includeUsers"
+            })        
+        }
+        elseif((($obj.conditions.users.includeUsers | Where { $_ -eq "None"}) -ne $null))
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.chooseApplicationsNone"
+                Category = $category
+                SubCategory = $includeLabel
+                EntityKey = "includeUsers"
+            })        
+        }
+        else
+        {
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = $includeLabel
+                Value = Get-LanguageString "AzureCA.userSelectionBladeSelectedUsers"
+                Category = $category
+                SubCategory = $includeLabel
+                EntityKey = "includeUsers"
+            })  
+
+            if((($obj.conditions.users.includeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null))
+            {
+                Add-CustomSettingObject ([PSCustomObject]@{
+                    Name = Get-LanguageString "AzureCA.allGuestUserLabel"
+                    Value = Get-LanguageString "Inputs.enabled" #$((?: (($obj.conditions.users.includeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null) "enabled" "disabled"))"
+                    Category = $category
+                    SubCategory = $includeLabel
+                    EntityKey = "includeGuestsOrExternalUsers"
+                })
+            }
+
+            if($obj.conditions.users.includeRoles.Count -gt 0)
+            {
+                $tmpObjs = @() 
+                foreach($id in $obj.conditions.users.includeRoles)
+                {
+                    $idObj = $script:allAadRoles | Where Id -eq $id
+                    $tmpObjs += ?? $idObj.displayName $id
+                }
+
+                Add-CustomSettingObject ([PSCustomObject]@{
+                    Name = Get-LanguageString "AzureCA.directoryRolesLabel"
+                    Value = $tmpObjs -join $script:objectSeparator
+                    Category = $category
+                    SubCategory = $includeLabel
+                    EntityKey = "includeRoles"
+                })
+            }
+
+            if(($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups).Count -gt 0)
+            {
+                $tmpObjs = @() 
+                foreach($id in ($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups))
+                {
+                    if($id -eq "GuestsOrExternalUsers") { continue }
+                    $idObj = $idInfo | Where Id -eq $id
+                    $tmpObjs += ?? $idObj.displayName $id
+                }
+                Add-CustomSettingObject ([PSCustomObject]@{
+                    Name = $category
+                    Value = $tmpObjs -join $script:objectSeparator
+                    Category = $category
+                    SubCategory = $includeLabel
+                    EntityKey = "includeUsersGroups"
+                })
+            }
+        }
+        
+        if((($obj.conditions.users.excludeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null))
         {
             Add-CustomSettingObject ([PSCustomObject]@{
                 Name = Get-LanguageString "AzureCA.allGuestUserLabel"
-                Value = Get-LanguageString "Inputs.enabled" #$((?: (($obj.conditions.users.includeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null) "enabled" "disabled"))"
+                Value = Get-LanguageString "Inputs.enabled" #$((?: (($obj.conditions.users.excludeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null) "enabled" "disabled"))"
                 Category = $category
-                SubCategory = $includeLabel
-                EntityKey = "includeGuestsOrExternalUsers"
+                SubCategory = $excludeLabel
+                EntityKey = "excludeGuestsOrExternalUsers"
             })
         }
 
-        if($obj.conditions.users.includeRoles.Count -gt 0)
+        if($obj.conditions.users.excludeRoles.Count -gt 0)
         {
             $tmpObjs = @() 
-            foreach($id in $obj.conditions.users.includeRoles)
+            foreach($id in $obj.conditions.users.excludeRoles)
             {
                 $idObj = $script:allAadRoles | Where Id -eq $id
                 $tmpObjs += ?? $idObj.displayName $id
@@ -2340,76 +2633,29 @@ function Invoke-CDDocumentConditionalAccess
                 Name = Get-LanguageString "AzureCA.directoryRolesLabel"
                 Value = $tmpObjs -join $script:objectSeparator
                 Category = $category
-                SubCategory = $includeLabel
-                EntityKey = "includeRoles"
+                SubCategory = $excludeLabel
+                EntityKey = "excludeRoles"
             })
         }
 
-        if(($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups).Count -gt 0)
+        if(($obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups).Count -gt 0)
         {
             $tmpObjs = @() 
-            foreach($id in ($obj.conditions.users.includeUsers + $obj.conditions.users.includeGroups))
+            foreach($id in ($obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups))
             {
                 if($id -eq "GuestsOrExternalUsers") { continue }
                 $idObj = $idInfo | Where Id -eq $id
                 $tmpObjs += ?? $idObj.displayName $id
             }
+            
             Add-CustomSettingObject ([PSCustomObject]@{
                 Name = $category
                 Value = $tmpObjs -join $script:objectSeparator
                 Category = $category
-                SubCategory = $includeLabel
-                EntityKey = "includeUsersGroups"
+                SubCategory = $excludeLabel
+                EntityKey = "excludeUsersGroups"
             })
         }
-    }
-    
-    if((($obj.conditions.users.excludeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null))
-    {
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = Get-LanguageString "AzureCA.allGuestUserLabel"
-            Value = Get-LanguageString "Inputs.enabled" #$((?: (($obj.conditions.users.excludeUsers | Where { $_ -eq "GuestsOrExternalUsers"}) -ne $null) "enabled" "disabled"))"
-            Category = $category
-            SubCategory = $excludeLabel
-            EntityKey = "excludeGuestsOrExternalUsers"
-        })
-    }
-
-    if($obj.conditions.users.excludeRoles.Count -gt 0)
-    {
-        $tmpObjs = @() 
-        foreach($id in $obj.conditions.users.excludeRoles)
-        {
-            $idObj = $script:allAadRoles | Where Id -eq $id
-            $tmpObjs += ?? $idObj.displayName $id
-        }
-
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = Get-LanguageString "AzureCA.directoryRolesLabel"
-            Value = $tmpObjs -join $script:objectSeparator
-            Category = $category
-            SubCategory = $excludeLabel
-            EntityKey = "excludeRoles"
-        })
-    }
-
-    if(($obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups).Count -gt 0)
-    {
-        $tmpObjs = @() 
-        foreach($id in ($obj.conditions.users.excludeUsers + $obj.conditions.users.excludeGroups))
-        {
-            if($id -eq "GuestsOrExternalUsers") { continue }
-            $idObj = $idInfo | Where Id -eq $id
-            $tmpObjs += ?? $idObj.displayName $id
-        }
-        
-        Add-CustomSettingObject ([PSCustomObject]@{
-            Name = $category
-            Value = $tmpObjs -join $script:objectSeparator
-            Category = $category
-            SubCategory = $excludeLabel
-            EntityKey = "excludeUsersGroups"
-        })
     }
 
     ###################################################
@@ -2630,6 +2876,19 @@ function Invoke-CDDocumentConditionalAccess
         elseif($script:allTermsOfUse  -isnot [Object[]]) {  $script:allTermsOfUse  = @($script:allTermsOfUse ) }
     }
 
+    <#
+    if(-not $script:allAuthenticationStrength -and (($obj.grantControls.authenticationStrength | measure).Count -gt 0))
+    {
+        $script:allAuthenticationStrength = Get-DocOfflineObjects "AuthenticationStrengths"
+        if(-not $script:allAuthenticationStrength)
+        {
+            $script:allAuthenticationStrength  = (Invoke-GraphRequest -url "/identity/conditionalAccess/authenticationStrengths/policies?`$select=displayName,Id" -ODataMetadata "minimal").value
+        }
+        if(-not $script:allAuthenticationStrength ) {  $script:allAuthenticationStrength  = @()}
+        elseif($script:allAuthenticationStrength  -isnot [Object[]]) {  $script:allAuthenticationStrength  = @($script:allAuthenticationStrength ) }
+    } 
+    #>   
+
     if($obj.conditions.locations.includeLocations.Count -gt 0)
     {
         $tmpObjs = @() 
@@ -2753,7 +3012,7 @@ function Invoke-CDDocumentConditionalAccess
         }
         else
         {
-            $filterMode = "included"
+            $filterMode = "excluded"
         }
 
         #AzureCA.PolicyBlade.Conditions.DeviceAttributes.AssignmentFilter.Blade
@@ -2869,6 +3128,34 @@ function Invoke-CDDocumentConditionalAccess
                 EntityKey = "termsOfUse"
             })            
         }
+
+        if(($obj.grantControls.authenticationStrength | measure).Count -gt 0)
+        {
+            $authenticationStrngth = @()
+            foreach($tmpId in $obj.grantControls.authenticationStrength)
+            {
+                $authenticationStrngth += ?? $obj.grantControls.authenticationStrength.displayName $tmpId
+            }
+    
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = Get-LanguageString "AzureCA.WhatIfBlade.authenticationStrength"
+                Value =   $termsOfUse -join $script:objectSeparator
+                Category = $category
+                SubCategory = ""
+                EntityKey = "authenticationStrength"
+            })            
+        }
+        
+        if(($obj.grantControls.customAuthenticationFactors | measure).Count -gt 0)
+        {    
+            Add-CustomSettingObject ([PSCustomObject]@{
+                Name = Get-LanguageString "AzureCA.menuItemClaimProviderControls"
+                Value =   $obj.grantControls.customAuthenticationFactors -join $script:objectSeparator
+                Category = $category
+                SubCategory = ""
+                EntityKey = "customAuthenticationFactors"
+            })            
+        }        
     
         Add-CustomSettingObject ([PSCustomObject]@{
             Name = Get-LanguageString "AzureCA.descriptionContentForControlsAndOr"
@@ -2913,10 +3200,6 @@ function Invoke-CDDocumentConditionalAccess
     
     if($obj.sessionControls.signInFrequency.isEnabled -eq $true)
     {
-        if($obj.sessionControls.cloudAppSecurity.cloudAppSecurityType -eq "mcasConfigured") { $strId = "useCustomControls" }
-        elseif($obj.sessionControls.cloudAppSecurity.cloudAppSecurityType -eq "monitorOnly") { $strId = "monitorOnly" }
-        elseif($obj.sessionControls.cloudAppSecurity.cloudAppSecurityType -eq "blockDownloads") { $strId = "blockDownloads" }
-
         if($obj.sessionControls.signInFrequency.type -eq "hours")
         {
             if($obj.sessionControls.signInFrequency.value -gt 1)
@@ -2928,7 +3211,7 @@ function Invoke-CDDocumentConditionalAccess
                 $value = Get-LanguageString "AzureCA.SessionLifetime.SignInFrequency.Option.Hour.singular"
             }
         }
-        else
+        elseif($obj.sessionControls.signInFrequency.type -eq "days")
         {
             if($obj.sessionControls.signInFrequency.value -gt 1)
             {
@@ -2939,6 +3222,10 @@ function Invoke-CDDocumentConditionalAccess
                 $value = Get-LanguageString "AzureCA.SessionLifetime.SignInFrequency.Option.Day.singular"
             }
         }
+        else
+        {
+            $value = Get-LanguageString "AzureCA.SessionControls.SignInFrequency.everytime"
+        }
 
         Add-CustomSettingObject ([PSCustomObject]@{
             Name = Get-LanguageString "AzureCA.SessionLifetime.SignInFrequency.Option.label"
@@ -2948,6 +3235,26 @@ function Invoke-CDDocumentConditionalAccess
             EntityKey = "SignInFrequency"
         })
     }
+
+    if($null -ne $obj.sessionControls.continuousAccessEvaluation) 
+    {
+        if($obj.sessionControls.continuousAccessEvaluation.mode -eq "strictLocation")
+        {
+            $value = Get-LanguageString "AzureCA.SessionControls.Cae.strictLocation"
+        }
+        else
+        {
+            $value = Get-LanguageString "AzureCA.SessionControls.Cae.disable"
+        }        
+
+        Add-CustomSettingObject ([PSCustomObject]@{
+            Name = Get-LanguageString "AzureCA.SessionControls.Cae.checkboxLabel"
+            Value =  $value
+            Category = $category
+            SubCategory = ""
+            EntityKey = "continuousAccessEvaluation"
+        })        
+    }    
     
     if($obj.sessionControls.persistentBrowser.isEnabled -eq $true)
     {

@@ -1,4 +1,183 @@
 # Release Notes
+## 3.9.7 - 2024-06-27
+
+**New features**
+
+- **Compare**<br />
+  - Added support for automation with batch job<br />
+  - Added a new Compare provider - Intune Objects with Exported Files (Name)<br />
+  This will support comparison exported policies between environments<br />
+  - Added support for skipping missing source policies<br />
+  - Added support for skipping missing destination policies<br />
+  Based on [Issue 203](https://github.com/Micke-K/IntuneManagement/issues/203) and [Issue 128](https://github.com/Micke-K/IntuneManagement/issues/128)<br />
+
+- **Compliance**<br />
+  - Added support for Compliance v2 policies eg Linx policies<br />
+
+**Fixes**
+- **Compare**<br />
+  - Renamed default provider to "Exported Files with Intune Objects (Id)" from "Intune Objects with Exported Files"<br />
+- **Generic**<br />
+  - Fixed issue with domain names with special characters in Profile info<br />
+  Based on [Issue 237](https://github.com/Micke-K/IntuneManagement/issues/237)<br />
+  - Lots of spelling and languag fixes  in documentation, script and UI<br />
+  A huge thank you to **@ee61r1** for doing all this!<br />
+
+- **Import/Export**<br />
+  - Added support for exporting script for MacOS Custom attribute<br />
+  Based on [Issue 244](https://github.com/Micke-K/IntuneManagement/issues/244)<br />
+
+- **Documentation**<br />
+  - App Configuration (Device) documentation updated<br />
+  Hopfully add support for Android. Not verified since I don't have one in my test environment<br />
+  Please continue discussion on the Issue below if this is still not working<br />
+  Based on [Issue 231](https://github.com/Micke-K/IntuneManagement/issues/231)<br />
+  - Added support for documenting MacOS Custom attribute<br />
+  Based on [Issue 244](https://github.com/Micke-K/IntuneManagement/issues/244)<br />
+  - Fixed issed when documenting Shell script. Code was not included<br />
+  - Language files re-generated<br />
+  - AppTypes file re-generated. Some apps were not documented with proper name<br />
+
+  <br />
+
+## 3.9.6 - 2024-04-22
+
+**BREAKING CHANGE**<br />
+Microsoft are decommissioning the Intune PowerShell App with id d1ddf0e4-d672-4dae-b554-9d5bdfd93547, mentioned [here](https://learn.microsoft.com/en-us/mem/intune/fundamentals/whats-new#plan-for-change-update-your-powershell-scripts-with-a-microsoft-entra-id-registered-app-id-by-april-2024)<br />
+This was the default app in IntuneManagement. The default app is now changed to Microsoft Graph PowerShell app with id 14d82eec-204b-4c2f-b7e8-296a70dab67e<br />
+The script will automatically use that app for new installationsbr<br />
+A warning to change will be displayed if d1ddf0e4-d672-4dae-b554-9d5bdfd93547 is used<br />
+You can also register a new app, documented [here](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) and then configure that app in Settings<br />
+<br />
+*Note*: This might require consent for the required permissions<br />
+<br />
+There is no change if you are currently using a custom app or already changed to Microsoft Graph PowerShell in Settings<br />
+<br />
+Also note that changing application will reset cached accounts<br />
+
+**New features**
+
+- **Compare**<br />
+  - Added support for ignoring Basic properties and Assignments<br />
+  Based on [Issue 203](https://github.com/Micke-K/IntuneManagement/issues/203) and [Issue 128](https://github.com/Micke-K/IntuneManagement/issues/128)<br />
+  **NOTE:** Properties will be logged but with empty value for Match<br />
+
+**Fixes**
+- **Compare**<br />
+  - Fixed issue when comparing Settings Catalog settings with child settings eg Hardened UNC Paths in Security Baseline<br />
+- **Import/Export**<br />
+  - Added support for import of MSIX app content<br />
+  Based on [Discussion 191](https://github.com/Micke-K/IntuneManagement/discussions/191)<br />
+  - Disable autoload of modules to prevent loading MSGraph module if found<br />
+  Based on [Issue 208](https://github.com/Micke-K/IntuneManagement/issues/208)<br />
+
+- **Documentation**<br />
+  - Language files re-generated.<br />
+  - AppTypes file re-generated. Some apps were not documented with proper name.<br />
+
+  <br />
+
+## 3.9.5 - 2024-01-20
+
+**Fixes**
+- **Import/Export**<br />
+  - Assignments were not exported for some policies with trailing . in the name<br />
+  Based on [Issue 184](https://github.com/Micke-K/IntuneManagement/issues/184)<br />
+  **NOTE:** Policy will not export if full path is over 260 characters<br /> 
+  - Fixed issue with policies not being exported when Batch was enabled in Settings<br />
+  and there was only one policy for the specified object type<br />
+  - Failed to get App Protection policies when Proxy was configured<br />
+  - Fixed issue with importing policies with dependency in tenants with 100+ policies for a single policy type<br />
+  Dependency only imported first page. All pages will be imported now to resolve dependencies<br /> 
+  Based on [Issue 183](https://github.com/Micke-K/IntuneManagement/issues/183)<br />
+ - Fixed issue with multiple export folders when using %DateTime% in path<br />
+  Based on [Issue 189](https://github.com/Micke-K/IntuneManagement/issues/189)<br />
+ 
+- **Get Assignment Filter usage**<br />
+  - Filters not returned if only assigned to one policy<br />
+  Based on [Issue 141](https://github.com/Micke-K/IntuneManagement/issues/141)<br />
+  **NOTE:** Start the tool from: Views -> Intune Tools -> Intune Filter Usage<br /> 
+
+- **Compare**<br />
+  - Comparing Settings Catalog objects with exported objects failed<br />
+  Issue cause by offline documentation was not working<br />
+  Based on [Issue 183](https://github.com/Micke-K/IntuneManagement/issues/183)<br />
+
+- **Documentation**<br />
+  - Offline documentation of Settings Catalog was not working.<br />
+  Values were always documented from online object<br />
+  - Conditional Access documentation updates for Android and iOS<br />
+  - App Protection documentation updates for Android and iOS<br />
+  - Language files re-generated. Azure shou now be Entra for some documentations.<br />
+
+  <br />
+
+## 3.9.4 - 2023-12-18
+
+**Fixes**
+- **Get Assignment Filter usage**<br />
+  - All policies that supports filter should now be collected<br />
+  Please create an issue if not all expected filters are listed<br />
+  Based on [Issue 141](https://github.com/Micke-K/IntuneManagement/issues/141)<br />
+  **NOTE:** Start the tool from: Views -> Intune Tools -> Intune Filter Usage<br />
+
+- **Documentation**<br />
+  - Added support for documenting Conditional Access policies based on Workloads<br />
+  Not 100% tested. Please report if not documented correctly<br />
+  <br />
+
+## 3.9.3  - 2023-12-11
+
+**New features**
+
+- **New tool - Get Assignment Filter usage**<br />
+  - List all policies and assignments with a Filter defined<br />
+  Based on [Issue 141](https://github.com/Micke-K/IntuneManagement/issues/141)<br />
+  **NOTE:** Start the tool from: Views -> Intune Tools -> Intune Filter Usage<br />
+  
+- **Batch Export of App Content Encryption Key from Intunewin files**<br />
+  This script can export encryption keys from existing intunewin files<br />
+  Example:<br />
+  Export-EncrytionKeys -RootFolder C:\Intune\Packages -ExportFolder C:\Intune\Download<br />
+  This will export the encryption key information for each .intunewinfiles under C:\Intune\Packages<br />
+  One json file will be created (for each .intunwinfile) in the C:\Intune\Download folder<br />
+  File name will be **<*IntunewinFileBaseName*>_<*UnencryptedFileSize*>.json**<br />
+  Do **NOT** rename this file since the script will search for that file when downloading or exporting App content<br />
+  The script will not require authentication and it will have no knowledge of apps in Intune<br />
+  Filename and unencrypted file size is used as the identifier to match app content in Intune with encryption file<br />
+  **Important notes:**<br /> 
+  Exported and decrypted .intunewin files are not supported to use for import at the moment.<br />
+  These files are just the "zip" version of the source and can be unzipped with any zip extraction tool<br />
+  The .intunewin file used for import has the "zip" version of the file and an xml with the encryption information +<br />
+  additional file information eg. msi properties, file size etc.<br />
+  Use the exported unencrypted "zip" version to restore the original files. Re-run the packaging tool if it should be re-used as applications content<br />
+  <br />
+  Please report any issues or create a discussion if there are any questions<br />
+  Script is located: **<*RootFolder*>\Scripts\Export-EncrytionKeys.ps1**<br />
+
+<br />
+
+**Fixes**
+- **Export**<br />
+  - Fixed issue where Assignments were included in export even if 'Export Assignments' was unchecked<br />
+  Based on [Issue 171](https://github.com/Micke-K/IntuneManagement/issues/171)<br />
+
+- **Documentation**<br />
+  - Fixed issue where filter was not documented on some policies<br />
+  - Fixed issue with Word Output provider if a policy only had one settings<br />
+  
+- **Custom ADMX Files**<br />
+  - Fixed bug with migrating custom policies between environments. Cache was not cleared when swapping tenants or imported additional ADMX files<br />
+  - Fixed documentention issue with Administrative template policies in GCC environment. Name and Category was missing<br />
+  Based on [Issue 174](https://github.com/Micke-K/IntuneManagement/issues/174)<br />
+  - Custom ADMX based policies was missing properties when swapping tenant<br />
+  Based on [Issue 124](https://github.com/Micke-K/IntuneManagement/issues/124)<br />
+
+- **Generic**<br />
+  - Fixed logging issues when processing objects with a group that was deleted. ID was not reported<br />
+  - Generic Batch request function created to support other batch requests eg Groups<br />
+  <br />
+
 ## 3.9.2  - 2023-10-17
 
 **New features**
