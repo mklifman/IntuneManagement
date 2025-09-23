@@ -3084,17 +3084,7 @@ function Get-GraphMigrationObjectsFromFile
                     {
                         $groupName = $migTableGroupName
                         Write-Log "No group object found for $groupName. Creating a cloud group with default settings" 2
-                        $dateStr = ((Get-Date).ToString("yyMMddHHmmss"))
-                        
-                        if(($groupName.Length + $dateStr.Length) -gt 64)
-                        {
-                            $nickName = $groupName.Substring(0,(64-$dateStr.Length))
-                        }
-                        else
-                        {
-                            $nickName = $groupName
-                        }
-                        $nickName = $nickName + $dateStr
+                        $nickName = (New-Guid).Guid.SubString(0,10)
                         
                         $groupJson = @"
                         { 
