@@ -859,7 +859,7 @@ function Show-GraphObjects
         $tmpPageSize = Get-SettingValue "GraphPageSize"
     }
 
-    if($tmpPageSize -eq "Skip") {
+    if($global:curObjectType.SupportsPageSize -eq $false) {
         # Do nothing - use default page size from API
     }
     elseif ($tmpPageSize -eq "All")

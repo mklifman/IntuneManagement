@@ -156,8 +156,8 @@ function Invoke-InitializeModule
         ImportExtension = { Add-ConditionalAccessImportExtensions @args }
         PreImportCommand = { Start-PreImportConditionalAccess @args }
         PostExportCommand = { Start-PostExportConditionalAccess  @args }
-        ExpandAssignmentsList = $false
-        PageSize = "Skip"
+        ExpandAssignmentsList = $false        
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -171,7 +171,8 @@ function Invoke-InitializeModule
         Permissons=@("Agreement.ReadWrite.All")
         PreImportCommand = { Start-PreImportTermsOfUse @args }
         PostExportCommand = { Start-PostExportTermsOfUse  @args }
-        GroupId = "ConditionalAccess"        
+        GroupId = "ConditionalAccess"
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -183,6 +184,7 @@ function Invoke-InitializeModule
         ImportOrder = 50
         GroupId = "ConditionalAccess"
         ExpandAssignmentsList = $false
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -819,6 +821,7 @@ function Invoke-InitializeModule
         ExpandAssignmentsList = $false
         Icon = "ConditionalAccess"
         GroupId = "EndpointSecurity"
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -834,6 +837,7 @@ function Invoke-InitializeModule
         ExpandAssignmentsList = $false
         Icon = "ConditionalAccess"
         GroupId = "EndpointSecurity"
+        SupportsPageSize = $false
     })
     
     Add-ViewItem (New-Object PSObject -Property @{
