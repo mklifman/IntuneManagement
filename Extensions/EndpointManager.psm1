@@ -204,6 +204,7 @@ function Invoke-InitializeModule
         Permissons=@("DeviceManagementConfiguration.ReadWrite.All")
         Dependencies = @("ReusableSettings")
         GroupId = "EndpointSecurity"        
+        SupportsPageSize = $false
     })    
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -217,6 +218,7 @@ function Invoke-InitializeModule
         PostExportCommand = { Start-PostExportCompliancePolicies @args }
         PreUpdateCommand = { Start-PreUpdateCompliancePolicies @args }
         GroupId = "CompliancePolicies"
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -264,6 +266,7 @@ function Invoke-InitializeModule
         SkipRemoveProperties = @('Id') # Id is removed by PreImport. Required for default profile
         PropertiesToRemoveForUpdate = @('isDefaultProfile','disableClientTelemetry')
         GroupId = "TenantAdmin"
+        SupportsPageSize = $false
     })
 
     <#
@@ -291,6 +294,7 @@ function Invoke-InitializeModule
         GroupId = "Azure"
         SkipAddIDOnExport = $true
         ExpandAssignmentsList = $false
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -314,6 +318,7 @@ function Invoke-InitializeModule
         AssignmentsType = "enrollmentConfigurationAssignments"
         PropertiesToRemoveForUpdate = @('priority')
         GroupId = "WinEnrollment"
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -337,6 +342,7 @@ function Invoke-InitializeModule
         AssignmentsType = "enrollmentConfigurationAssignments"
         GroupId = "EnrollmentRestrictions"
         ViewProperties = @("displayName","platformType","description","Id")
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -352,6 +358,7 @@ function Invoke-InitializeModule
         SkipRemoveProperties = @('Id')        
         GroupId = "WinEnrollment"
         Icon = "EnrollmentStatusPage"
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -428,6 +435,7 @@ function Invoke-InitializeModule
         PreImportAssignmentsCommand = { Start-PreImportAssignmentsTermsAndConditions @args }
         GroupId = "TenantAdmin"
         ExpandAssignmentsList = $false
+        SupportsPageSize = $false
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -448,6 +456,7 @@ function Invoke-InitializeModule
         Dependencies = @("Applications")
         GroupId = "AppProtection"
         ExpandAssignmentsList = $false
+        SupportsPageSize = $false
     })
 
     # These are also included in the managedAppPolicies API
@@ -467,6 +476,7 @@ function Invoke-InitializeModule
         Icon = "AppConfiguration"
         GroupId = "AppConfiguration"
         ExpandAssignmentsList = $false
+        SupportsPageSize = $false
     })    
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -578,6 +588,7 @@ function Invoke-InitializeModule
         Icon = "UpdatePolicies"
         GroupId = "WinQualityUpdates"
         PropertiesToRemoveForUpdate = @('releaseDateDisplayName','deployableContentDisplayName')
+        SupportsPageSize = $false
     })    
 
     # Locations are not FULLY supported 
@@ -647,7 +658,8 @@ function Invoke-InitializeModule
         API = "/deviceManagement/hardwareConfigurations"
         Permissons=@("DeviceManagementConfiguration.ReadWrite.All")
         Icon="DeviceConfiguration"
-        GroupId = "DeviceConfiguration"        
+        GroupId = "DeviceConfiguration"
+        SupportsPageSize = $false
     })   
 
     Add-ViewItem (New-Object PSObject -Property @{
@@ -778,6 +790,7 @@ function Invoke-InitializeModule
         PreDeleteCommand = { Start-PreDeleteADMXFiles @args }
         ViewProperties = @("fileName","status","Id")
         PropertiesToRemove = @("languageCodes","targetPrefix","targetNamespace","policyType","revision","status","uploadDateTime")
+        SupportsPageSize = $false
     })
 
     <#
@@ -1058,7 +1071,14 @@ function Set-EMViewPanel
     $global:btnLoadAllPages.add_click({
         Write-Status "Loading $($global:curObjectType.Title) objects"
         [array]$graphObjects = Get-GraphObjects -property $global:curObjectType.ViewProperties -objectType $global:curObjectType -AllPages
-        $graphObjects | Where-Object { $_ -ne $null } | ForEach-Object { $global:dgObjects.ItemsSource.AddNewItem($_) | Out-Null }        
+        if(-not $global:dgObjects.Columns)
+        {
+            Show-GraphObjects -FromGraphObjects $graphObjects
+        }
+        else 
+        {
+            $graphObjects | Where-Object { $_ -ne $null } | ForEach-Object { $global:dgObjects.ItemsSource.AddNewItem($_) | Out-Null }
+        }
         $global:dgObjects.ItemsSource.CommitNew()
         Set-GraphPagesButtonStatus
         Invoke-FilterBoxChanged $global:txtFilter -ForceUpdate
@@ -1068,7 +1088,14 @@ function Set-EMViewPanel
     $global:btnLoadNextPage.add_click({
         Write-Status "Loading $($global:curObjectType.Title) objects"
         [array]$graphObjects = Get-GraphObjects -property $global:curObjectType.ViewProperties -objectType $global:curObjectType -SinglePage
-        $graphObjects | Where-Object { $_ -ne $null } | ForEach-Object { $global:dgObjects.ItemsSource.AddNewItem($_) | Out-Null  }        
+        if(-not $global:dgObjects.Columns)
+        {
+            Show-GraphObjects -FromGraphObjects $graphObjects
+        }
+        else 
+        {
+            $graphObjects | Where-Object { $_ -ne $null } | ForEach-Object { $global:dgObjects.ItemsSource.AddNewItem($_) | Out-Null }
+        }
         $global:dgObjects.ItemsSource.CommitNew()
         Set-GraphPagesButtonStatus
         Invoke-FilterBoxChanged $global:txtFilter

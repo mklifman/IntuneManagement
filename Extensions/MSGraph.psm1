@@ -215,7 +215,7 @@ function Invoke-InitializeModule
         DefaultValue = $true
         Description = "This will export/import info for referenced/navigation properties eg certificates in VPN profiles etc."
     }) "ImportExport"
-        
+
     Add-SettingsObject (New-Object PSObject -Property @{
         Title = "ApplicationId"
         Key = "GraphAzureAppId"
@@ -243,6 +243,13 @@ function Invoke-InitializeModule
         Type = "Boolean"
         DefaultValue = $false
         Description = "Login with specified app in the UI. Note: Change will require app restart"
+    }) "GraphSilent"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "TenantId"
+        Key = "GraphAzureTenantId"
+        Type = "String"
+        Description = "Tenent Id used when logging in with App in UI"
     }) "GraphSilent"
 
     Add-SettingsObject (New-Object PSObject -Property @{
@@ -290,7 +297,7 @@ function Invoke-InitializeModule
         Key = "GraphPageSize"
         Type = "List"
         ItemsSource = $script:lstGraphPageSize
-        DefaultValue = "20"
+        DefaultValue = "100"
         Description = "How many items load at a time"
     }) "GraphGeneral"
 
@@ -790,7 +797,7 @@ function Add-GraphObjectProperties
 
 function Show-GraphObjects
 {
-    param($filter, [switch]$ObjectTypeChanged)
+    param($filter, [switch]$ObjectTypeChanged, $FromGraphObjects)
 
     $global:curObjectType = $global:lstMenuItems.SelectedItem
 
@@ -833,7 +840,9 @@ function Show-GraphObjects
 
     if(-not $global:lstMenuItems.SelectedItem) { return }
 
-    Write-Status "Loading $($global:curObjectType.Title) objects" 
+    if(-not $FromGraphObjects) {
+        Write-Status "Loading $($global:curObjectType.Title) objects" 
+    }
 
     if($global:lstMenuItems.SelectedItem.ShowForm -ne $false)
     {
@@ -864,7 +873,7 @@ function Show-GraphObjects
     }
     elseif ($tmpPageSize -eq "All")
     {
-        $params.Add("AllPages", $true)        
+        $params.Add("AllPages", $true)
     }else
     {
         
@@ -882,7 +891,12 @@ function Show-GraphObjects
         $params.Add("SinglePage", $true)
     }
 
-    [array]$graphObjects = Get-GraphObjects -property $global:curObjectType.ViewProperties -objectType $global:curObjectType -Filter $filter @params
+    if($FromGraphObjects) {
+        [array]$graphObjects = $FromGraphObjects
+    }
+    else {
+        [array]$graphObjects = Get-GraphObjects -property $global:curObjectType.ViewProperties -objectType $global:curObjectType -Filter $filter @params
+    }
 
     $dgObjects.AutoGenerateColumns = $false
     $dgObjects.Columns.Clear()
@@ -960,7 +974,9 @@ function Show-GraphObjects
     }
     else
     {
-        $dgObjects.ItemsSource = $null
+        $ocList = [System.Collections.ObjectModel.ObservableCollection[object]]::new()
+        $dgObjects.ItemsSource = [System.Windows.Data.CollectionViewSource]::GetDefaultView($ocList)
+        #$dgObjects.ItemsSource = $null
     }
 
     
