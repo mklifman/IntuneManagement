@@ -409,10 +409,31 @@ function Invoke-WordPostProcessItems
     catch {}
 
     #update fields, ToC etc.
-    $script:doc.Fields | ForEach-Object -Process { $_.Update() | Out-Null } 
-    $script:doc.TablesOfContents | ForEach-Object -Process { $_.Update() | Out-Null }
-    $script:doc.TablesOfFigures | ForEach-Object -Process { $_.Update() | Out-Null }
-    $script:doc.TablesOfAuthorities | ForEach-Object -Process { $_.Update() | Out-Null }
+    try {
+        $script:doc.Fields | ForEach-Object -Process { $_.Update() | Out-Null } 
+    }
+    catch {
+        Write-LogError "Failed to update document fields" $_.Exception
+    }
+    try {
+        $script:doc.TablesOfContents | ForEach-Object -Process { $_.Update() | Out-Null }
+    }
+    catch {
+        Write-LogError "Failed to update Table of Contents" $_.Exception
+    }
+    try {
+        $script:doc.TablesOfFigures | ForEach-Object -Process { $_.Update() | Out-Null }
+    }
+    catch {
+        Write-LogError "Failed to update Table of Figures" $_.Exception
+    }
+    try {
+        $script:doc.TablesOfAuthorities | ForEach-Object -Process { $_.Update() | Out-Null }    
+    }
+    catch {
+        Write-LogError "Failed to update Table of Authorities" $_.Exception
+    }
+        
 
     Write-Log "Using document format: $($global:cbWordDocumentationFormat.SelectedValue)"
     try {
