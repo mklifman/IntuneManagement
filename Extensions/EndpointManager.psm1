@@ -891,6 +891,7 @@ function Invoke-InitializeModule
         QUERYLIST = "`$top=500"
         Permissons = @("DeviceManagementConfiguration.ReadWrite.All")
         GroupId = "DeviceConfiguration"
+        ExpandAssignmentsList = $false
     })
     
 }
