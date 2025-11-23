@@ -309,6 +309,15 @@ function Invoke-InitializeModule
         DefaultValue = "disabled"
         Description = "Define the default option of the Conditional Access policy state. It is recommended to have this to disabled to avoid accidental tenant lock out"
     }) "ImportExport"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "Sort Json Properties"
+        Key = "SortJsonProperties"
+        Type = "Boolean"
+        DefaultValue = $false
+        Description = "This will use sorted JSON properties when exporting JSON data. Making sure that properties are in the same order in each export."
+    }) "ImportExport"
+
 }
 
 function Get-GraphAppInfo
@@ -4554,7 +4563,12 @@ function Save-GraphObjectToFile
 {
     param($obj, $fileName)
 
-    $json = $obj | ConvertTo-Json -Depth 50
+    if(((Get-SettingValue "SortJsonProperties") -eq "True")) {
+        $json = $obj | ConvertTo-JsonSortedGraph -Depth 50
+    }
+    else {
+        $json = $obj | ConvertTo-Json -Depth 50
+    }
 
     if($global:Organization.Id)
     {
@@ -4649,4 +4663,133 @@ function Confirm-GraphMatchFilter
         }
     }
     return $true
+}
+
+function Invoke-SortJsonGraphObject {
+    param(
+        [Parameter(Mandatory)]
+        $InputObject
+    )
+
+    if ($null -eq $InputObject) { return $null }
+
+    if ($InputObject -is [System.Collections.IList]) {
+        $new = @()
+        foreach ($item in $InputObject) {
+            $new += Invoke-SortJsonGraphObject $item
+        }
+        return ,$new
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary] -or
+        $InputObject -is [System.Management.Automation.PSCustomObject]) {
+
+        $props =
+            if ($InputObject -is [System.Collections.IDictionary]) {
+                $InputObject.Keys
+            } else {
+                $InputObject.PSObject.Properties.Name
+            }
+
+        $baseGroups = @{}
+
+        foreach ($p in $props) {
+            if ($p -match '^(.+?)@(.+)$') {
+                $base  = $matches[1]
+                if (-not $baseGroups.ContainsKey($base)) {
+                    $baseGroups[$base] = @{
+                        Base = $null
+                        Meta = New-Object System.Collections.ArrayList
+                    }
+                }
+                [void]$baseGroups[$base].Meta.Add($p)
+            }
+        }
+
+        foreach ($p in $props) {
+            if ($baseGroups.ContainsKey($p)) {
+                $baseGroups[$p].Base = $p
+            }
+        }
+
+        $atProps   = @()  # starts with @
+        $hashProps = @()  # starts with #
+        $normal    = @()  # everything else
+
+        foreach ($p in $props) {
+
+            if ($p.StartsWith('@')) {
+                $atProps += $p
+                continue
+            }
+
+            if ($p.StartsWith('#')) {
+                $hashProps += $p
+                continue
+            }
+
+            # If in a baseGroup, skip for now (added later)
+            if ($baseGroups.ContainsKey($p)) {
+                continue
+            }
+
+            $normal += $p
+        }
+
+        $atProps   = $atProps   | Sort-Object
+        $normal    = $normal    | Sort-Object
+        $hashProps = $hashProps | Sort-Object
+
+        $orderedNames = @()
+
+        $orderedNames += $atProps
+
+        foreach ($base in ($baseGroups.Keys | Sort-Object)) {
+
+            $meta = $baseGroups[$base].Meta | Sort-Object
+
+            foreach ($m in $meta) {
+                $orderedNames += $m
+            }
+
+            if ($null -ne $InputObject.$base) {
+                $orderedNames += $base
+            }
+        }
+
+        $orderedNames += $normal
+        $orderedNames += $hashProps
+
+        $result = [ordered]@{}
+        foreach ($p in $orderedNames) {
+            $value = 
+                if ($InputObject -is [System.Collections.IDictionary]) {
+                    $InputObject[$p]
+                } else {
+                    $InputObject.$p
+                }
+
+            if($null -ne $value) {
+                $result[$p] = Invoke-SortJsonGraphObject $value
+            }
+            else {                
+                $result[$p] = $null                
+            }
+        }
+
+        return [pscustomobject]$result
+    }
+
+    return $InputObject
+}
+
+function ConvertTo-JsonSortedGraph {
+    param(
+        [Parameter(ValueFromPipeline, Mandatory)]
+        $InputObject,
+
+        [int]$Depth = 50
+    )
+    $sorted = Invoke-SortJsonGraphObject $InputObject
+    return $sorted | ConvertTo-Json -Depth $Depth
 }
