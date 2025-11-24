@@ -2757,6 +2757,27 @@ function Format-XML
     $StringWriter.ToString()
 }
 
+function Update-XmlFormatting {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [string]$Xml
+    )
+    process {
+
+        # 1. Fix empty xml elements → <tag/> instead of <tag />
+        $Xml = $Xml -replace '<([^\s/>]+)([^>]*)\s/>' , '<$1$2/>'
+
+        # 2. Remove empty lines (lines containing only whitespace or nothing)
+        $Xml = ($Xml -split "`r?`n") |
+            Where-Object { $_.Trim().Length -gt 0 } |
+            ForEach-Object { $_ } |
+            Out-String
+
+        return $Xml.Trim()
+    }
+}
+
 function Show-LogView
 {
     if($script:LogViewObject -and -not $script:LogViewObject.ViewPanel)
