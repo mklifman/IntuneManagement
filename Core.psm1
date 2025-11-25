@@ -2765,11 +2765,11 @@ function Update-XmlFormatting {
     )
     process {
 
-        # 1. Fix empty xml elements → <tag/> instead of <tag />
+        $Xml = $Xml -replace "`r`n", "`n"
+
         $Xml = $Xml -replace '<([^\s/>]+)([^>]*)\s/>' , '<$1$2/>'
 
-        # 2. Remove empty lines (lines containing only whitespace or nothing)
-        $Xml = ($Xml -split "`r?`n") |
+        $Xml = ($Xml -split "`n") |
             Where-Object { $_.Trim().Length -gt 0 } |
             ForEach-Object { $_ } |
             Out-String
