@@ -2765,14 +2765,14 @@ function Update-XmlFormatting {
     )
     process {
 
-        $Xml = $Xml -replace "`r`n", "`n"
-
         $Xml = $Xml -replace '<([^\s/>]+)([^>]*)\s/>' , '<$1$2/>'
 
-        $Xml = ($Xml -split "`n") |
+        $Xml = ($Xml -split "`r?`n") |
             Where-Object { $_.Trim().Length -gt 0 } |
             ForEach-Object { $_ } |
             Out-String
+
+        $Xml = $Xml -replace "`r`n", "`n"
 
         return $Xml.Trim()
     }
