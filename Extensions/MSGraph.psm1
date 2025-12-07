@@ -4563,7 +4563,7 @@ function Save-GraphObjectToFile
 {
     param($obj, $fileName)
 
-    if(((Get-SettingValue "SortJsonProperties") -eq "True")) {
+    if(((Get-SettingValue "SortJsonProperties") -eq $true)) {
         $json = $obj | ConvertTo-JsonSortedGraph -Depth 50
     }
     else {

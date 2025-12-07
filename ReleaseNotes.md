@@ -1,4 +1,27 @@
 # Release Notes
+## 3.10.2 - 2025-10-14
+
+**Fixes**
+
+- **Generic**<br />
+  - Paging<br />
+  Paging was introduce in 3.10 but was missed in the release notes and caused a lot of issues<br />
+  Turns out that far from all APIs supports paging<br />
+  Looks like Settings Catalog has a very weird paging solution where it returs the wrong number of objects<br />
+  Sometimes it reports it has more pages even if there are not objects to load e.g. I set page size to 5 and tried to load Android OEM Config<br />
+  Default page size is set to <b>100</b><br />
+  <b>Note:</b> Set <b>API Page size</b> in settings to <b>Graph API Default</b> to skip paging<br />
+  Based on [Issue 364](https://github.com/Micke-K/IntuneManagement/issues/364)<br />
+  - Entra Group Creation
+  Entra groups will now be created with random mailNickname to match the Entra portal.
+
+- **Authentication**<br />
+  - Login with App in UI<br />
+  This was enabled before but Tenant ID was added to Settings to allow App Id login to a single tenant<br />
+  Based on [Issue 367](https://github.com/Micke-K/IntuneManagement/issues/367)<br />
+  <b>Note:</b>This is <b>NOT</b> recommended except for testing App permissions etc. The secret is stored in clear text
+
+
 ## 3.10.1 - 2025-09-14
 
 <br />

@@ -2033,11 +2033,22 @@ function Invoke-CDDocumentMobileAppConfiguration
         {
             $name = $xml.dict.ChildNodes[$i].'#text'
             $i++
-            $value = $xml.dict.ChildNodes[$i].'#text'
+
+            if($xml.dict.ChildNodes[$i].Name -eq "true" -or $xml.dict.ChildNodes[$i].Name -eq "false")
+            {
+                $value = $xml.dict.ChildNodes[$i].Name             
+                $type = "boolean"
+            }
+            else 
+            {
+                $value = $xml.dict.ChildNodes[$i].'#text'
+                $type = $xml.dict.ChildNodes[$i].Name
+            }
 
             Add-CustomSettingObject ([PSCustomObject]@{
                 Name = $name
                 Value = $value
+                ValueType = $type
                 EntityKey = $name
                 Category = $category
             })             
