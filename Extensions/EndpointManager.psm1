@@ -580,7 +580,7 @@ function Invoke-InitializeModule
     })
 
     Add-ViewItem (New-Object PSObject -Property @{
-        Title = "Quality Updates"
+        Title = "Quality Updates (Profiles)"
         Id = "QualityUpdates"
         ViewID = "IntuneGraphAPI"
         API = "/deviceManagement/windowsQualityUpdateProfiles"
@@ -588,6 +588,17 @@ function Invoke-InitializeModule
         Icon = "UpdatePolicies"
         GroupId = "WinQualityUpdates"
         PropertiesToRemoveForUpdate = @('releaseDateDisplayName','deployableContentDisplayName')
+        SupportsPageSize = $false
+    })
+
+    Add-ViewItem (New-Object PSObject -Property @{
+        Title = "Quality Updates (Policies)"
+        Id = "QualityUpdatePolicies"
+        ViewID = "IntuneGraphAPI"
+        API = "/deviceManagement/windowsQualityUpdatePolicies"
+        Permissons=@("DeviceManagementConfiguration.ReadWrite.All")
+        Icon = "UpdatePolicies"
+        GroupId = "WinQualityUpdates"
         SupportsPageSize = $false
     })    
 
