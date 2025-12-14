@@ -99,6 +99,29 @@ function Invoke-InitializeModule
         }
     )
 
+    # Bit 1: Bulk export
+    # Bit 2: Manual export
+    # Bit 3: Bulk import
+    # Bit 4: Manual import
+    $script:lstClearCacheTypes = @(
+        [PSCustomObject]@{
+            Name = "Bulk export (Default)"
+            Value = "1" # Bulk export only
+        },
+        [PSCustomObject]@{
+            Name = "Bulk and manual export"
+            Value = "3"
+        },
+        [PSCustomObject]@{
+            Name = "Bulk export/import"
+            Value = "7" #
+        },
+        [PSCustomObject]@{
+            Name = "Bulk and manual import/export"
+            Value = "15" # Both bulk and manual
+        }
+    )
+
     # Make sure MS Graph settings are added before exiting before App Id and Tenant Id is missing
     Write-Log "Add settings and menu items"
 
@@ -316,6 +339,33 @@ function Invoke-InitializeModule
         Type = "Boolean"
         DefaultValue = $false
         Description = "This will use sorted JSON properties when exporting JSON data. Making sure that properties are in the same order in each export."
+    }) "ImportExport"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "Clear Cache Before Export"
+        Key = "ClearCacheBeforeExportImport"
+        Type = "List"
+        ItemsSource = $script:lstClearCacheTypes
+        DefaultValue = "1"
+        Description = "Specifies when objects should be cleared from cache.<LineBreak />" +
+                    "<Bold>Bulk export (Default)</Bold> - Clear objects from cache before bulk export.<LineBreak />" +
+                    "<Bold>Bulk and manual export</Bold> - Clear objects from cache before bulk and manual export.<LineBreak />" +
+                    "<Bold>Bulk export/import</Bold> - Clear objects from cache before bulk export or import.<LineBreak />" +
+                    "<Bold>Bulk and manual export/import</Bold> - Clear objects from cache before bulk or manual export or import.<LineBreak /><LineBreak />" +
+                    "<Bold>Note:</Bold> - Only Entra objects are cleared by default. Enable <Bold>Clear all objects from cache</Bold> to clear MigTable etc.."
+
+    }) "ImportExport"
+
+    Add-SettingsObject (New-Object PSObject -Property @{
+        Title = "Clear all objects from cache"
+        Key = "ClearAllObjectsFromCache"
+        Type = "Boolean"
+        DefaultValue = $false
+        Description = "This will clear all objects from cache e.g. groups, MigTabole etc.<LineBreak />" + 
+        "This can be used if objects have been changed outside of the application to make sure the latest info e.g.<LineBreak />" +
+        "* New groups added<LineBreak />" +
+        "* New dependencies added<LineBreak />" +
+        "<Bold>Note:</Bold> - Clearing all cached object might cause import/export to take long timw or even reimport deleted policies/groups etc."
     }) "ImportExport"
 
 }
@@ -1587,7 +1637,14 @@ function Start-GraphObjectExport
     $script:exportRoot = Expand-FileName (Get-XamlProperty $script:exportForm "txtExportPath" "Text")
     Write-Log "Export root folder: $script:exportRoot"
 
-    $global:AADObjectCache = $null
+    if((Get-SettingValue "ClearAllObjectsFromCache"))
+    {
+        Invoke-GraphAuthenticationUpdated
+    }
+    else
+    {
+        $global:AADObjectCache = $null
+    }
 
     foreach($item in $script:exportObjects)
     { 
@@ -1884,6 +1941,20 @@ function Show-GraphImportForm
     Add-XamlEvent $script:importForm "btnImportSelected" "add_click" {
         Write-Status "Import objects"
         #Get-GraphDependencyDefaultObjects
+
+        $clearCacheValue = ?? ((Get-SettingValue "ClearCacheBeforeExportImport" "1") -as [int]) 1
+        if($clearCacheValue -band 8)
+        {
+            if((Get-SettingValue "ClearAllObjectsFromCache"))
+            {
+                Invoke-GraphAuthenticationUpdated
+            }
+            else
+            {
+                $global:AADObjectCache = $null
+            }
+        }
+
         $allowUpdate = $true 
         $filesToImport = $global:dgObjectsToImport.ItemsSource | Where Selected -eq $true
         if($global:curObjectType.PreFilesImportCommand)
@@ -2093,6 +2164,19 @@ function Start-GraphObjectImport
     
     $tmpFolder = Expand-FileName (Get-XamlProperty $script:importForm "txtImportPath" "Text")
     Write-Log "Import root folder: $tmpFolder"
+
+    $clearCacheValue = ?? ((Get-SettingValue "ClearCacheBeforeExportImport" "1") -as [int]) 1
+    if($clearCacheValue -band 4)
+    {
+        if((Get-SettingValue "ClearAllObjectsFromCache"))
+        {
+            Invoke-GraphAuthenticationUpdated
+        }
+        else
+        {
+            $global:AADObjectCache = $null
+        }
+    }
 
     $importedObjects = 0
 
@@ -3299,6 +3383,19 @@ function Export-GraphObjects
 
     $objectType = $global:curObjectType
     Write-Status "Export $($objectType.Title)"
+
+    $clearCacheValue = ?? ((Get-SettingValue "ClearCacheBeforeExportImport" "1") -as [int]) 1
+    if($clearCacheValue -band 2)
+    {
+        if((Get-SettingValue "ClearAllObjectsFromCache"))
+        {
+            Invoke-GraphAuthenticationUpdated
+        }
+        else
+        {
+            $global:AADObjectCache = $null
+        }
+    }
 
     $script:ExportRoot = (Get-XamlProperty $script:exportForm "txtExportPath" "Text")
     $folder = Get-GraphObjectFolder  $objectType $script:ExportRoot (Get-XamlProperty $script:exportForm "chkAddObjectType" "IsChecked") (Get-XamlProperty $script:exportForm "chkAddCompanyName" "IsChecked")

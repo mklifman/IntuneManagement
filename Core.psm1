@@ -1712,7 +1712,11 @@ function Add-SettingsItem
     {
         if($settingValue.Description)
         {
-            $descriptionInfo = "<Rectangle Style=`"{DynamicResource InfoIcon}`" ToolTip=`"$($settingValue.Description)`" Margin=`"5,0,0,0`" />"
+            $descriptionInfo = "<Rectangle Style=`"{DynamicResource InfoIcon}`" Margin=`"5,0,0,0`">" +
+                "<Rectangle.ToolTip><TextBlock>" +
+                $settingValue.Description +
+                "</TextBlock></Rectangle.ToolTip>" +
+                "</Rectangle>"
         }
     
         $xaml = @"
