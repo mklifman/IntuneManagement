@@ -4872,6 +4872,15 @@ function Invoke-SortJsonGraphObject {
             else {                
                 $result[$p] = $null                
             }
+
+            if($InputObject.$p -is [Array] -and $result[$p] -isnot [Array]) {
+                if($result[$p] -eq $null) {
+                    $result[$p] = @()
+                }
+                else {
+                    $result[$p] = @($result[$p])
+                }
+            }
         }
 
         return [pscustomobject]$result
