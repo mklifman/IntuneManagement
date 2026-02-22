@@ -2228,7 +2228,7 @@ function Invoke-CDDocumentCountryNamedLocation
     $countryList = @()
     foreach($country in $obj.countriesAndRegions)
     {
-        $countryList += Get-LanguageString "CountryNames.countryName$($country.ToLower())"
+        $countryList += Get-LanguageString "AzureIAMCommon.CountryNames.countryName$($country.ToUpper())"
     }
 
     Add-CustomSettingObject ([PSCustomObject]@{
