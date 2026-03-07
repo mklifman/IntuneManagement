@@ -2891,6 +2891,37 @@ function Start-PostGetApplications {
             $obj.Object | Add-Member -MemberType NoteProperty -Name "#CustomRefSupersedence" -Value ($supersededApps -join "|*|")
         }
     }
+
+    if($obj.Object.'@odata.type' -eq "#microsoft.graph.win32LobApp")
+    {
+        if($obj.Object.activeInstallScript.targetId -or $obj.Object.activeUninstallScript.targetId)
+        {
+            $scriptInfo = (Invoke-GraphRequest -Url "/deviceAppManagement/mobileApps/$($obj.Id)/microsoft.graph.win32LobApp/contentVersions/$($obj.Object.committedContentVersion)/scripts/").value
+
+            foreach($script in $scriptInfo) {
+                $scriptFullInfo = (Invoke-GraphRequest -Url "/deviceAppManagement/mobileApps/$($obj.Id)/microsoft.graph.win32LobApp/contentVersions/$($obj.Object.committedContentVersion)/scripts/$($script.id)?`$select=Id,Content")
+                if($scriptFullInfo.Content)
+                {
+                    $script.content = $scriptFullInfo.Content
+                }
+
+                if($obj.Object.activeInstallScript.targetId -eq $script.id)
+                {
+                    $tpObject = $obj.Object.activeInstallScript
+                }
+                elseif($obj.Object.activeUninstallScript.targetId -eq $script.id)
+                {
+                    $tpObject = $obj.Object.activeUninstallScript
+                }
+                else
+                {
+                    Write-Log "Script with id $($script.id) is not referenced by active install or uninstall script. Skipping." 2
+                    continue
+                }
+                $tpObject | Add-Member -MemberType NoteProperty -Name "#ScriptInfo" -Value $script -Force
+            }
+        }
+    }
 }
 
 function Start-PostImportApplications
