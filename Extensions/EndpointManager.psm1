@@ -509,8 +509,8 @@ function Invoke-InitializeModule
         ImportOrder = 60
         Expand="categories,assignments" # ODataMetadata is set to minimal so assignments can't be autodetected
         ODataMetadata="minimal" # categories property not supported with ODataMetadata full
-        PostFileImportCommand = { Start-PostFileImportApplications @args }
-        PostCopyCommand = { Start-PostCopyApplications @args }
+            PostFileImportCommand = { Start-PostFileImportApplication @args }
+        PostCopyCommand = { Start-PostCopyApplication @args }
         PreUpdateCommand = { Start-PreUpdateApplication  @args }
         PreImportCommand = { Start-PreImportCommandApplication  @args }
         DetailExtension = { Add-DetailExtensionApplications @args }
@@ -2403,15 +2403,16 @@ function Start-PreImportAssignmentsAppConfiguration
 
 #region Applications
 
-function Start-PostCopyApplications
+function Start-PostCopyApplication
 {
     param($objCopyFrom, $objNew, $objectType)
 
     Start-ImportApp $objNew
+    Start-AddInstallScripts $objNew $objCopyFrom
     Write-Status ""
 }
 
-function Start-PostFileImportApplications
+function Start-PostFileImportApplication
 {
     param($obj, $objectType, $file)
     
@@ -2432,6 +2433,7 @@ function Start-PostFileImportApplications
     }
     
     Start-ImportApp $obj $tmpFilName
+    Start-AddInstallScripts $obj $tmpObj
 }
 
 function local:Start-ImportApp
@@ -2507,6 +2509,84 @@ function local:Start-ImportApp
     }
 }
 
+function local:Start-AddInstallScripts
+{
+    param($obj, $fromAppObj)
+
+    if($fromAppObj -and ($fromAppObj.activeInstallScript."#ScriptInfo" -or $fromAppObj.activeUninstallScript."#ScriptInfo"))
+    {
+        Write-Log "Importing scripts for $($obj.displayName)"
+
+        $scriptsAdded = $false        
+        $jsonData = @{}
+        $jsonData."@odata.type"             = "#microsoft.graph.win32LobApp"
+        $jsonData."committedContentVersion" = "1"
+
+        foreach ($scriptType in @('activeInstallScript','activeUninstallScript')) {
+            $scriptInfo = $fromAppObj.$scriptType.'#ScriptInfo'
+            if (-not $scriptInfo) { continue }
+
+            Write-Log "Add $($scriptType -replace '^active','') script: $($scriptInfo.displayName)"
+
+            $json = [ordered]@{
+                '@odata.type'          = $scriptInfo.'@odata.type'
+                displayName            = $scriptInfo.displayName
+                enforceSignatureCheck  = $scriptInfo.enforceSignatureCheck
+                runAs32Bit             = $scriptInfo.runAs32Bit
+                content                = $scriptInfo.content
+            } | ConvertTo-Json -Depth 10 -Compress
+
+            $scriptObject = Invoke-GraphRequest -Url "deviceAppManagement/mobileApps/$($obj.id)/microsoft.graph.win32LobApp/contentVersions/1/scripts" -Method POST -Content $json
+
+            if ($scriptObject) {
+                $jsonData.$scriptType = @{ targetId = $scriptObject.Id }
+                $scriptsAdded = $true
+            }
+        }
+
+        $i = 0
+        while($true)
+        {
+            $scripts = Invoke-GraphRequest -Url "deviceAppManagement/mobileApps/$($obj.id)/microsoft.graph.win32LobApp/contentVersions/1/scripts"
+            if(-not $scripts)
+            {
+                Write-Log "Failed to retrieve scripts for app after adding. Skipping Install/Uninstall script config." 2
+                return
+            }
+
+            if(($scripts.value.state | Select -Unique) -eq "commitSuccess")
+            {
+                Write-Log "Scripts added successfully"
+                break
+            }
+            if($i -ge 12)
+            {
+                Write-Log "Install/Uninstall scripts are still not in pending state after waiting for 1 minute." 3
+                return
+            }
+
+            Write-Log "Waiting for scripts to be added..."
+            Start-Sleep -Seconds 5
+            $i++
+        }        
+
+        if($scriptsAdded)
+        {
+            Write-Log "Add script info to app"
+            $json = ConvertTo-Json $jsonData -Depth 10
+            $status = Invoke-GraphRequest -Url "deviceAppManagement/mobileApps/$($obj.id)" -Method PATCH -Body $json
+            if($status -eq $true)
+            {
+                Write-Log "Install/Uninstall script info updated successfully"
+            }
+            else
+            {
+                Write-Log "Failed to update Install/Uninstall script info" 2
+            }
+        }
+    }
+}
+
 function Start-PreUpdateApplication
 {
     param($obj, $objectType, $curObject, $fromObj)
@@ -2544,6 +2624,9 @@ function Start-PreImportCommandApplication
             $obj.officeSuiteAppDefaultFileFormat = "officeOpenXMLFormat"
         }
     }
+
+    if($obj.activeInstallScript) { $obj.activeInstallScript = $null }
+    if($obj.activeUninstallScript) { $obj.activeUninstallScript = $null }
 } 
 
 function Add-DetailExtensionApplications
@@ -2767,6 +2850,16 @@ function Start-PostExportApplications
                         [IO.File]::WriteAllBytes(("$path\$($fi.BaseName)_RequirementScript.ps1"), ([System.Convert]::FromBase64String($rule.ScriptContent)))
                     }
                 }
+            }
+
+            if($obj.activeInstallScript.'#ScriptInfo'.displayName)
+            {
+                [IO.File]::WriteAllBytes(("$path\$($fi.BaseName)_$($obj.activeInstallScript.'#ScriptInfo'.displayName)"), ([System.Convert]::FromBase64String($obj.activeInstallScript.'#ScriptInfo'.content)))
+            }
+
+            if($obj.activeUninstallScript.'#ScriptInfo'.displayName)
+            {
+                [IO.File]::WriteAllBytes(("$path\$($fi.BaseName)_$($obj.activeUninstallScript.'#ScriptInfo'.displayName)"), ([System.Convert]::FromBase64String($obj.activeUninstallScript.'#ScriptInfo'.content)))
             }
         }
         catch
