@@ -509,7 +509,7 @@ function Invoke-InitializeModule
         ImportOrder = 60
         Expand="categories,assignments" # ODataMetadata is set to minimal so assignments can't be autodetected
         ODataMetadata="minimal" # categories property not supported with ODataMetadata full
-            PostFileImportCommand = { Start-PostFileImportApplication @args }
+        PostFileImportCommand = { Start-PostFileImportApplication @args }
         PostCopyCommand = { Start-PostCopyApplication @args }
         PreUpdateCommand = { Start-PreUpdateApplication  @args }
         PreImportCommand = { Start-PreImportCommandApplication  @args }
@@ -654,7 +654,7 @@ function Invoke-InitializeModule
         ViewProperties = @("name","description","Id")
         Expand="Settings"
         Icon="DeviceConfiguration"
-        GroupId = "DeviceConfiguration"        
+        GroupId = "DeviceConfiguration"
     })   
     
     Add-ViewItem (New-Object PSObject -Property @{
@@ -2353,7 +2353,7 @@ function local:Add-AppConfigurationTargets
                 $appName, $appId, $appType = $targetedApp -split "[|][!][|]"
                 if(-not $appName -or -not $appId)
                 {
-                    Write-Log "App Name and Id is missing in string: $appApp" 2
+                    Write-Log "App Name and Id is missing in string: $targetedApp" 2
                     continue
                 }
                 $tmpApps = (Invoke-GraphRequest -Url "/deviceAppManagement/mobileApps?`$filter=displayName eq '$appName'").value
@@ -2814,6 +2814,8 @@ function Start-PreImportAssignmentsApplications
 
 function Start-PreDeleteApplications
 {
+    param($obj, $objectType)
+
     if($obj.'@odata.type' -eq "#microsoft.graph.microsoftStoreForBusinessApp")
     {
         # Don't delete Microsoft Store for Business Apps
@@ -3077,9 +3079,9 @@ function local:Add-ApplicationReferences
                     Write-Log "No $appName application found with version $appVer" 2
                     continue
                 }
-                elseif(-not ($tmpApp | measure).Count -gt 1)
+                elseif(($tmpApp | measure).Count -gt 1)
                 {
-                    Write-Log "Multiple $appName application found with version $appVer" 2
+                    Write-Log "Multiple $appName applications found with version $appVer" 2
                     continue
                 }
                 Write-Log "Add $appName ($appVer) to Dependency list"
@@ -3098,7 +3100,7 @@ function local:Add-ApplicationReferences
                 $appName, $appVer, $appId, $appType = $suppApp -split "[|][!][|]"
                 if(-not $appName -or -not $appVer)
                 {
-                    Write-Log "Could not get Name and Version from string: $appApp" 2
+                    Write-Log "Could not get Name and Version from string: $suppApp" 2
                     continue
                 }
                 $tmpApps = (Invoke-GraphRequest -Url "/deviceAppManagement/mobileApps?`$filter=displayName eq '$appName'").value

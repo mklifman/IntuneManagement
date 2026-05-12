@@ -1116,7 +1116,6 @@ function Connect-MSALUser
             }
             else
             {
-                $lastUser = 
                 $lastUserId = Get-Setting "" "LastLoggedOnUserId"
                 if($lastUserId)
                 {

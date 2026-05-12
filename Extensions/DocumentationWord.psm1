@@ -291,8 +291,8 @@ function Invoke-WordPreProcessItems
     }
 
     $script:wordStyles = @()
-    $script:doc.Styles | foreach { 
-        $script:wordStyles += [PSCUstomObject]@{
+    $script:doc.Styles | foreach {         
+        $script:wordStyles += [PSCustomObject]@{ 
             Name=$_.NameLocal
             Type=$_.Type
             Style=$_

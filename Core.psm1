@@ -1112,7 +1112,7 @@ function Get-Folder
         {
             $dlgCOFD.InitialDirectory = $path
         }
-        if($dlgCOFD.ShowDialog($window) = [Microsoft.WindowsAPICodePack.Dialogs.CommonFileDialogResult]::Ok)
+        if($dlgCOFD.ShowDialog($window) -eq [Microsoft.WindowsAPICodePack.Dialogs.CommonFileDialogResult]::Ok)
         {
             $dlgCofd.FileName            
         }
@@ -1410,7 +1410,7 @@ function Remove-Setting
         try
         {
             $temp = Get-Item -LiteralPath $regPath -ErrorAction SilentlyContinue
-            if(($temp.Property -contains $Key))
+            if(($temp -and $temp.Property -contains $Key))
             {
                 Remove-ItemProperty -Path $regPath -Name $Key -Force -ErrorAction Stop
             }
@@ -1424,7 +1424,7 @@ function Remove-Setting
 
 function Get-Setting
 {    
-    param($SubPath = "", $Key = "", $defautValue)
+    param($SubPath = "", $Key = "", $defaultValue)
 
     if(-not $key)
     {
@@ -1489,7 +1489,7 @@ function Get-Setting
 
     if(-not $val) 
     {
-        $defautValue
+        $defaultValue
     }
     else
     {

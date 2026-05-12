@@ -586,7 +586,8 @@ function Invoke-GraphRequest
             do 
             {
                 $ret = Invoke-RestMethod -Uri $Url -Method $HttpMethod @params 
-                if($? -eq $false) 
+                $callSucceeded = $?
+                if($callSucceeded -eq $false) 
                 {
                     throw $global:error[0]
                 }
@@ -622,7 +623,6 @@ function Invoke-GraphRequest
             if($_.Exception.Response.StatusCode -eq 429 -and $retryCount -le $retryMax)
             {
                 # NOT OK - Should use the date property but could not replicate the issue
-                $retryCount++
                 $retryRequest = $true
                 Write-Log "429 - Too many requests received. Wait 5 s before retry" 2
                 Start-Sleep -Seconds 5
@@ -2244,7 +2244,7 @@ function Start-GraphObjectImport
                         ImportedObject = $importedObj
                     }
                 }
-                $arrImportedObjects = $importedObj
+                $arrImportedObjects += $importedObj
 
                 $importedObjects++
                 $importedObjectsCurType++

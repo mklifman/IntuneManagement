@@ -1700,7 +1700,7 @@ function Add-IntentSettingObjectToList
         {
             $passConstraint = ($dependencyItemObj.RawValue -ne $null -and $dependencyItemObj.RawValue.ToString() -ne "NotConfigured" -and $dependencyItemObj.RawValue.ToString() -ne "False")
         }
-        if(-not $passConstraint) { break ]}
+        if(-not $passConstraint) { break }
     }
 
     if(-not $passConstraint)
@@ -4424,7 +4424,7 @@ function local:Invoke-StartDocumentatiom
     $script:migTable = $null
     $script:scopeTags = $null
 
-    $diSource = $nul
+    $diSource = $null
     $global:intentCategories = $null
     $global:catRecommendedSettings = $null
     $global:intentCategoryDefs = $null
@@ -4486,7 +4486,7 @@ function local:Invoke-StartDocumentatiom
                 $tmpObj | Add-Member Noteproperty -Name "GroupName" -Value (Get-ObjectTypeGroupName $tmpObj.ObjectType) -Force
             }
 
-            if($groupSourceList.Count -eq 0) { contnue }
+            if($groupSourceList.Count -eq 0) { continue }
 
             if($curObjectType.GroupId -eq "EndpointSecurity")
             {
